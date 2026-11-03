@@ -7,10 +7,10 @@ import { shortcut } from '@/lib/utils';
 
 // Default subtitle — also used as the empty/idle fallback. Cached so it
 // renders the same string each call without rebuilding the shortcut.
-const RECORD_SHORTCUT = shortcut('⌘⇧R', 'Ctrl+Shift+R');
+const RECORD_SHORTCUT = shortcut('⌘⌃R', 'Ctrl+Shift+R');
 const RECORDING_HINT = `Start recording from the top-right, or from anywhere with ${RECORD_SHORTCUT}.`;
 // When the global record shortcut is turned off (Settings), the hero must not
-// advertise it — drop the "or from anywhere with ⌘⇧R" clause.
+// advertise it — drop the "or from anywhere with ⌘⌃R" clause.
 const RECORDING_HINT_NO_HOTKEY = 'Start recording from the top-right.';
 
 // Cached at module load to avoid rebuilding on every render. We don't
@@ -35,7 +35,7 @@ export interface HeroState {
   calendarConnected: boolean;
   now: number;
   // Whether the global record shortcut is enabled (Settings). Gates every
-  // ⌘⇧R mention in the subtitle copy so the hero never advertises a shortcut
+  // ⌘⌃R mention in the subtitle copy so the hero never advertises a shortcut
   // the user has turned off.
   hotkeyEnabled: boolean;
 }
@@ -95,23 +95,23 @@ export function heroHeadline(s: HeroState): string {
 // Subtitle. Mirrors the headline cases. Keeps the recording shortcut hint
 // as the default fallback so the page always tells the user how to act.
 export function heroSubtitle(s: HeroState): string {
-  // Idle/upcoming fallback hint — drops the ⌘⇧R clause when the shortcut is off.
+  // Idle/upcoming fallback hint — drops the ⌘⌃R clause when the shortcut is off.
   const idleHint = s.hotkeyEnabled ? RECORDING_HINT : RECORDING_HINT_NO_HOTKEY;
   if (s.status === 'recording') {
     // Source of truth for "what we're capturing" is the active session
     // name — the user may have started a recording titled after one
     // event while a different calendar event is also concurrently in
     // progress, and the subtitle should reflect what they actually hit
-    // record on. ⌘⇧R is a record-toggle per main.js's global shortcut
+    // record on. ⌘⌃R is a record-toggle per main.js's global shortcut
     // so "to stop" is accurate when already recording.
     const title =
       s.sessionName?.trim() || s.inProgressEvent?.title?.trim() || 'In progress';
-    // Drop the "· ⌘⇧R to stop" tail when the global shortcut is off — stopping
+    // Drop the "· ⌘⌃R to stop" tail when the global shortcut is off — stopping
     // is then a click-only action on the bottom bar.
     return s.hotkeyEnabled ? `${title} · ${RECORD_SHORTCUT} to stop` : title;
   }
   if (s.status === 'paused') {
-    // ⌘⇧R is a record-toggle: while paused it STOPS (finalizes) the recording
+    // ⌘⌃R is a record-toggle: while paused it STOPS (finalizes) the recording
     // rather than resuming. Resume is a click-only action on the bottom bar,
     // so point there instead of advertising a shortcut that would end the note.
     return 'Recording paused. Tap resume on the bar below to continue.';

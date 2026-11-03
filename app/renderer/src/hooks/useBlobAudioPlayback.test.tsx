@@ -2,7 +2,7 @@ import { StrictMode, type ReactNode } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useBlobAudioPlayback } from './useBlobAudioPlayback';
+import { captureVoiceSampleStop, useBlobAudioPlayback } from './useBlobAudioPlayback';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,9 +42,7 @@ describe('useBlobAudioPlayback', () => {
 
   it('ignores a sample request that resolves after unmount', async () => {
     const request = deferred<string>();
-    const { result, unmount } = renderHook(() =>
-      useBlobAudioPlayback(() => request.promise),
-    );
+    const { result, unmount } = renderHook(() => useBlobAudioPlayback(() => request.promise));
 
     let toggle!: Promise<void>;
     act(() => {
@@ -59,17 +57,13 @@ describe('useBlobAudioPlayback', () => {
   });
 
   it('does not claim the global playback slot through a stale callback after unmount', async () => {
-    const first = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
+    const first = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
     const staleToggle = first.result.current.toggle;
     first.unmount();
 
     await staleToggle('person-1');
 
-    const second = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
+    const second = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
     await act(() => second.result.current.toggle('person-2'));
 
     expect(FakeAudio.instances).toHaveLength(1);
@@ -77,9 +71,7 @@ describe('useBlobAudioPlayback', () => {
   });
 
   it('revokes the active blob URL when playback stops', async () => {
-    const { result } = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
+    const { result } = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
 
     await act(() => result.current.toggle('person-1'));
     expect(result.current.playingKey).toBe('person-1');
@@ -93,9 +85,7 @@ describe('useBlobAudioPlayback', () => {
 
   it('releases media and exposes an error when play rejects', async () => {
     FakeAudio.playResult = () => Promise.reject(new Error('blocked'));
-    const { result } = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
+    const { result } = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
 
     await act(() => result.current.toggle('person-1'));
 
@@ -105,13 +95,8 @@ describe('useBlobAudioPlayback', () => {
   });
 
   it('plays after the StrictMode development remount cycle', async () => {
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <StrictMode>{children}</StrictMode>
-    );
-    const { result } = renderHook(
-      () => useBlobAudioPlayback(async () => 'UklGRg=='),
-      { wrapper },
-    );
+    const wrapper = ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>;
+    const { result } = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='), { wrapper });
 
     await act(() => result.current.toggle('person-1'));
 
@@ -120,12 +105,8 @@ describe('useBlobAudioPlayback', () => {
   });
 
   it('stops playback owned by another hook before starting a new clip', async () => {
-    const first = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
-    const second = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
+    const first = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
+    const second = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
 
     await act(() => first.result.current.toggle('cluster-1'));
     await act(() => second.result.current.toggle('excerpt-2'));
@@ -143,12 +124,8 @@ describe('useBlobAudioPlayback', () => {
       playCalls += 1;
       return playCalls === 1 ? firstPlay.promise : Promise.resolve();
     };
-    const first = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
-    const second = renderHook(() =>
-      useBlobAudioPlayback(async () => 'UklGRg=='),
-    );
+    const first = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
+    const second = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
 
     let staleToggle!: Promise<void>;
     act(() => {
@@ -172,5 +149,23 @@ describe('useBlobAudioPlayback', () => {
     expect(FakeAudio.instances[1].pause).toHaveBeenCalledOnce();
     expect(first.result.current.playingKey).toBeNull();
     expect(second.result.current.playingKey).toBe('excerpt-3');
+  });
+  it('stops the approved sample and resets its play button', async () => {
+    const hook = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
+    await act(() => hook.result.current.toggle('sample'));
+    const stop = captureVoiceSampleStop();
+    act(stop);
+    expect(FakeAudio.instances[0].pause).toHaveBeenCalledOnce();
+    expect(hook.result.current.playingKey).toBeNull();
+  });
+
+  it('an approval finishing late does not stop a newer sample', async () => {
+    const hook = renderHook(() => useBlobAudioPlayback(async () => 'UklGRg=='));
+    await act(() => hook.result.current.toggle('first'));
+    const stop = captureVoiceSampleStop();
+    await act(() => hook.result.current.toggle('second'));
+    act(stop);
+    expect(hook.result.current.playingKey).toBe('second');
+    expect(FakeAudio.instances[1].pause).not.toHaveBeenCalled();
   });
 });

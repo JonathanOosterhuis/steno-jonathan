@@ -1,3 +1,19 @@
+# Steno Jonathan
+
+Personal source repository based on [Zaklamp02/StenoAI](https://github.com/Zaklamp02/StenoAI), preserving upstream history and licensing.
+
+## Current state
+
+The local customizations are committed here: microphone recovery, recording start timestamps, participant titles, editable person names, stop sample playback after speaker approval, Command+Control+R, and conservative multi-segment echo suppression.
+
+The application is currently still branded StenoAI. Independent app identity, data migration, and a clean end-to-end build from this checkout are pending. Existing build tooling is documented in [custom/README.md](custom/README.md); it currently targets the existing StenoAI installation. Do not run its install script expecting a separately named app.
+
+Personal recordings, transcripts, settings, models and voice profiles are not part of this repository. Use isolated user data for tests. Automatic upstream app updates are already disabled by the inherited custom-build flag.
+
+GitHub Actions are disabled initially so inherited release workflows cannot publish builds unintentionally. Upstream changes will be incorporated explicitly and tested.
+
+---
+
 > **Personal fork.** This is a customised build of [StenoAI](https://github.com/stenolabs/stenoai) by Steno Labs, based on the official v0.8.0 release and shared under the original [MIT license](LICENSE). All credit for the app goes to the StenoAI authors and contributors. This fork's changes are listed in [custom/README.md](custom/README.md). For the official app, downloads and support, use the [original repository](https://github.com/stenolabs/stenoai). This fork is not affiliated with or endorsed by Steno Labs.
 
 <div align="center">

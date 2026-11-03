@@ -5,8 +5,11 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   confirm: vi.fn(),
+  stop: vi.fn(),
   markCluster: vi.fn(),
 }));
+
+vi.mock('./useBlobAudioPlayback', () => ({ captureVoiceSampleStop: () => h.stop }));
 
 vi.mock('@/lib/ipc', () => ({
   ipc: () => ({
@@ -57,6 +60,7 @@ describe('speaker mutation recovery refreshes committed backend state', () => {
       }).catch(() => {});
     });
 
+    expect(h.stop).not.toHaveBeenCalled();
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: speakersKeys.suggestions('mtg001'),
     });
@@ -82,4 +86,11 @@ describe('speaker mutation recovery refreshes committed backend state', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: speakersKeys.all });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: meetingsKeys.detail(summaryFile) });
   });
+  test('a successful approval stops the captured sample', async () => {
+    h.confirm.mockResolvedValue({ success: true });
+    const { result } = renderMutation(useConfirmSpeaker);
+    await act(async () => { await result.current.mutateAsync({ meetingStem: 'mtg001', channel: 'mic', diarizationSpeakerId: 'SPEAKER_0', expectedRunId: 'run-1', personId: 'alpha' }); });
+    expect(h.stop).toHaveBeenCalledOnce();
+  });
+
 });

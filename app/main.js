@@ -212,7 +212,7 @@ const IS_E2E_HEADLESS = IS_E2E && process.env.STENOAI_E2E_HEADLESS === '1';
 // process.platform split is needed. The env override lets the e2e T2 spec
 // register a low-collision accelerator that can't clash with whatever the
 // real host already occupies (see e2e/specs/record-hotkey.t2.spec.ts).
-const RECORD_HOTKEY_ACCEL = process.env.STENOAI_E2E_RECORD_ACCEL || 'CommandOrControl+Shift+R';
+const RECORD_HOTKEY_ACCEL = process.env.STENOAI_E2E_RECORD_ACCEL || 'Command+Control+R'       ;
 
 // Shared toggle-recording handler for the global shortcut — reused by the
 // startup registration and the live-apply set-record-hotkey IPC handler so
@@ -2961,6 +2961,7 @@ function parseMeetingMarkdown(content, mdPath) {
   const stem = path.basename(mdPath).replace(/\.md$/, '');
   const sessionInfo = {
     name: meta.title || stem,
+    auto_title_base: meta.auto_title_base || null,
     processed_at: meta.date || '',
     duration_seconds: meta.duration_seconds ?? null,
     summary_file: mdPath,
@@ -10206,10 +10207,10 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
     }
     const dir = resolveRecordingsDir();
     const safeName = String(sessionName || 'Note').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
-    const filename = `sysaudio-${Date.now()}-${safeName}.webm`;
+    const filename = `sysaudio-${recordingRuntimeState.startedAtMs || Date.now()}-${safeName}-${crypto.randomUUID().slice(0, 8)}.webm`;
     const filePath = path.join(dir, filename);
     recordingJournal.update(filePath, 'recording', { sessionName: String(sessionName || 'Note'), summaryFile: summaryFileForAudio(filePath), appendTo: currentRecordingAppendTarget });
-    const stream = fs.createWriteStream(filePath);
+    const stream = fs.createWriteStream(filePath, { flags: 'wx' });
     // Attach an 'error' listener at creation time. A WriteStream that emits
     // 'error' with no listener re-throws as an uncaught exception and would
     // crash the main process (and the in-progress recording) — e.g. on ENOSPC

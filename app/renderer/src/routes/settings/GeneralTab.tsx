@@ -99,7 +99,7 @@ export function GeneralTab() {
   const setAutoInstallWhenIdle = useSetAutoInstallWhenIdle();
   const recordHotkey = useRecordHotkeySetting();
   const setRecordHotkey = useSetRecordHotkey();
-  const recordAccel = shortcut('⌘⇧R', 'Ctrl+Shift+R');
+  const recordAccel = shortcut('⌘⌃R', 'Ctrl+Shift+R');
   const silenceAutoStop = useSilenceAutoStopSetting();
   const setSilenceAutoStopEnabled = useSetSilenceAutoStopEnabled();
   const setSilenceAutoStopMinutes = useSetSilenceAutoStopMinutes();

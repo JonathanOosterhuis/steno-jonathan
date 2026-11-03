@@ -901,3 +901,20 @@ test('the Change picker offers people already assigned in this meeting first', a
   expect(names[0]).toContain('Person Alpha');
   expect(names[0]).toContain('here');
 });
+
+test('approving a person stops their playing voice sample', async ({ launchApp }) => {
+  const { page } = await launchApp({ mockIpc: true, env: { STENOAI_E2E_SEED_SPEAKER_SUGGESTIONS: '1' } });
+  await openDetail(page);
+  await page.evaluate(() => {
+    const state = { pauses: 0 }; Object.assign(window, { __approvalAudio: state });
+    HTMLMediaElement.prototype.play = async function () {};
+    HTMLMediaElement.prototype.pause = function () { state.pauses++; };
+  });
+  const row = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  await row.getByRole('button', { name: 'Play sample', exact: true }).first().click();
+  await expect(row.getByRole('button', { name: 'Stop sample', exact: true })).toBeVisible();
+  await row.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(row).toContainText('Confirmed as Person Alpha');
+  await expect(row.getByRole('button', { name: 'Stop sample', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).__approvalAudio.pauses)).toBeGreaterThan(0);
+});

@@ -790,6 +790,57 @@ def _segment_rms(wav_path, start_sec: float, end_sec: float) -> float:
         return 0.0
 
 
+def _drop_multi_segment_bleed(mic_segments, system_segments, mic_path, system_path):
+    """Conservative second pass for echo split differently across channels.
+
+    Keep system speech only when text agrees over nearby segments and the
+    original system signal is clearly stronger. Never filter short replies.
+    """
+    from difflib import SequenceMatcher
+
+    if not mic_path or not system_path or not system_segments:
+        return mic_segments
+    kept = []
+    dropped = 0
+    for mic in mic_segments:
+        words = re.findall(r"\w+", (mic.get("text") or "").lower())
+        if len(words) < 6:
+            kept.append(mic)
+            continue
+        start = float(mic.get("start") or 0)
+        end = float(mic.get("end") or start)
+        if end <= start:
+            kept.append(mic)
+            continue
+        nearby = [s for s in system_segments
+                  if start - 15 <= float(s.get("start") or 0) <= end + 3]
+        echo = False
+        for index in range(len(nearby)):
+            for count in range(1, 4):
+                group = nearby[index:index + count]
+                other = re.findall(r"\w+", " ".join(
+                    s.get("text") or "" for s in group).lower())
+                blocks = SequenceMatcher(None, words, other, autojunk=False).get_matching_blocks()
+                coverage = sum(b.size for b in blocks) / len(words)
+                if coverage < .85 or max(b.size for b in blocks) < 5:
+                    continue
+                # Compare the same original-audio interval on both channels.
+                # No gain-normalised audio, no text-only deletion on read errors.
+                mic_level = _segment_rms(mic_path, start, end)
+                system_level = _segment_rms(system_path, start, end)
+                if mic_level > 0 and system_level >= 1.5 * mic_level:
+                    echo = True
+                    break
+            if echo:
+                break
+        if echo:
+            dropped += 1
+        else:
+            kept.append(mic)
+    logger.info("Multi-segment bleed correction v1: dropped %d/%d mic", dropped, len(mic_segments))
+    return kept
+
+
 def _drop_per_segment_bleed(
     mic_segments: list,
     system_segments: list,
@@ -4157,6 +4208,23 @@ class WhisperTranscriber:
                 (*resolved, original[5])
                 for resolved, original in zip(resolved_labels, tagged)
             ]
+
+            echo_candidates = []
+            system_references = []
+            for index, item in enumerate(tagged):
+                start, label, text, channel, raw_sid, timed = item
+                end = next((other[0] for other in tagged[index + 1:]
+                            if other[3] == channel and other[0] > start), duration)
+                segment = {"start": start, "end": end, "text": text, "tag_index": index}
+                if channel == "system":
+                    system_references.append(segment)
+                elif label == "You":
+                    echo_candidates.append(segment)
+            retained = _drop_multi_segment_bleed(
+                echo_candidates, system_references, mic_path, system_path)
+            removed_indices = {s["tag_index"] for s in echo_candidates} - {
+                s["tag_index"] for s in retained}
+            tagged = [t for i, t in enumerate(tagged) if i not in removed_indices]
 
             # Same {"mic"|"system": {"recording_type", "clusters"}} shape
             # write_speakers_sidecar expects -- lets the caller

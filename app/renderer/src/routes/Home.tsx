@@ -33,7 +33,7 @@ export function Home({ mode }: HomeProps) {
   const calendar = useCalendarEvents();
   const recording = useRecording();
   // Default ON while loading / on error so the hero copy doesn't flicker the
-  // ⌘⇧R hint off then on (back-compat: the shortcut ships enabled). Also
+  // ⌘⌃R hint off then on (back-compat: the shortcut ships enabled). Also
   // require registered !== false: when another app owns the accelerator the
   // shortcut doesn't actually work, so advertising it would strand the user
   // on dead instructions — fall back to the click-based copy instead.

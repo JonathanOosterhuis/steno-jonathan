@@ -482,6 +482,34 @@ def _persist_speaker_sidecar(output_dir, meeting_stem: str, transcript_data: dic
     return True
 
 
+def _recording_started_at(audio_path) -> str:
+    """Use the capture timestamp, never the later transcription finish time."""
+    audio_path = Path(audio_path)
+    match = re.match(r"^sysaudio-(\d{13})-", audio_path.name)
+    if match:
+        return datetime.fromtimestamp(int(match.group(1)) / 1000).isoformat()
+    try:
+        stat = audio_path.stat()
+        return datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime)).isoformat()
+    except OSError:
+        return datetime.now().isoformat()
+
+
+def _conversation_title(name, audio_path, transcript="", language="en", generate=False):
+    """Name transcript-only meetings independently from summary generation."""
+    if name and not _AUTO_NAMED_PATTERN.match(name):
+        return name
+    if generate and transcript.strip():
+        try:
+            title = OllamaSummarizer().generate_title("", transcript, language=language)
+            if title and not _AUTO_NAMED_PATTERN.match(title.strip()):
+                return title.strip()
+        except Exception:
+            logger.warning("Automatic conversation title unavailable; using start time")
+    started = datetime.fromisoformat(_recording_started_at(audio_path))
+    return f"Conversation - {started:%d %b, %H:%M}"
+
+
 class MeetingPipeline:
     """Simple audio recorder and transcriber."""
     
@@ -786,10 +814,13 @@ Summary output language: {config.get_language_name(output_language)}
         # through _parse_meeting_markdown.
         short_error = " ".join(error.split())[:200]
         summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
-        processed_at = datetime.now().isoformat()
+        automatic_title = bool(_AUTO_NAMED_PATTERN.match(session_name or ""))
+        processed_at = _recording_started_at(audio_path)
+        session_name = _conversation_title(session_name, audio_path)
         duration_seconds = transcript_data.get("duration_seconds")
         md_meta = {
             'title': session_name,
+            'auto_title_base': session_name if automatic_title else None,
             'date': processed_at,
             'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': transcript_data.get("configured_language"),
@@ -862,6 +893,7 @@ Summary output language: {config.get_language_name(output_language)}
             raise Exception(f"Audio file not found: {audio_file}")
 
         # Step 1: Transcribe
+        automatic_title = bool(_AUTO_NAMED_PATTERN.match(session_name or ""))
         transcript_data = await self.transcribe_audio(audio_file, session_name)
 
         # A transcription crash is not silence — preserve the audio and save a
@@ -892,9 +924,11 @@ Summary output language: {config.get_language_name(output_language)}
                 transcript_text=text_for_summary,
             )
             summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
-            processed_at = datetime.now().isoformat()
+            processed_at = _recording_started_at(audio_path)
+            session_name = _conversation_title(session_name, audio_path, text_for_summary, output_language, generate=True)
             md_meta = {
                 'title': session_name,
+            'auto_title_base': session_name if automatic_title else None,
                 'date': processed_at,
                 'duration_seconds': int(duration_seconds) if duration_seconds else None,
                 'language': output_language,
@@ -994,9 +1028,11 @@ Summary output language: {config.get_language_name(output_language)}
 
         # Step 5: Save as .md (primary format for new meetings)
         summary_path = self.output_dir / f"{audio_path.stem}_summary.md"
-        processed_at = datetime.now().isoformat()
+        processed_at = _recording_started_at(audio_path)
+        session_name = _conversation_title(session_name, audio_path)
         md_meta = {
             'title': session_name,
+            'auto_title_base': session_name if automatic_title else None,
             'date': processed_at,
             'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': output_language,
@@ -1276,6 +1312,8 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
     import sys
 
     async def run():
+        nonlocal name
+        automatic_title = bool(_AUTO_NAMED_PATTERN.match(name or ""))
         recorder = MeetingPipeline()
 
         # Read user notes
@@ -1495,11 +1533,8 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             return
 
         # Auto-summarize gate (#258): when the user has turned off automatic
-        # note generation, stop at a transcript-only note. This runs BEFORE the
-        # summarizer is constructed and before any title / template-report LLM
-        # call — with the toggle off there are zero Ollama calls and Ollama need
-        # not be running at all. The user generates notes on demand later
-        # (reprocess), which regenerates the summary and drops notes_generated.
+        # note generation, save a transcript-only note. A short title is still
+        # generated independently; full summary/template reports remain opt-in.
         from src.config import get_config
         gate_config = get_config()
         if not gate_config.get_auto_summarize_enabled():
@@ -1510,9 +1545,12 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
             )
             audio_path = Path(audio_file)
             summary_path = recorder.output_dir / f"{audio_path.stem}_summary.md"
-            processed_at = datetime.now().isoformat()
+            processed_at = _recording_started_at(audio_path)
+            name = _conversation_title(name, audio_path, text_for_summary, output_language, generate=True)
+            print(f'TITLE:{name}', flush=True)
             md_meta = {
                 'title': name,
+                'auto_title_base': name if automatic_title else None,
                 'date': processed_at,
                 'duration_seconds': int(duration_seconds) if duration_seconds else None,
                 'language': output_language,
@@ -1630,9 +1668,11 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
 
         # Save as .md only (primary format for new meetings)
         summary_path = summary_path.with_suffix('.md')
-        processed_at = datetime.now().isoformat()
+        processed_at = _recording_started_at(audio_path)
+        session_name = _conversation_title(session_name, audio_path)
         md_meta = {
             'title': session_name,
+            'auto_title_base': session_name if automatic_title else None,
             'date': processed_at,
             'duration_seconds': int(duration_seconds) if duration_seconds else None,
             'language': output_language,
@@ -3158,6 +3198,7 @@ def _parse_meeting_markdown(md_path):
 
     session_info = {
         'name': meta.get('title', md_path.stem),
+        'auto_title_base': meta.get('auto_title_base'),
         'processed_at': meta.get('date', ''),
         'duration_seconds': meta.get('duration_seconds'),
         'summary_file': str(md_path),
@@ -3599,6 +3640,8 @@ def reprocess(summary_file, regenerate_title, retranscribe):
         # `not session_name` guards a note whose title is null/empty: it should
         # be named (treat as auto), and it must short-circuit before the regex
         # since re.match(None) raises.
+        automatic_title = (existing_data.get('session_info', {}).get('auto_title_base') == session_name
+                           and bool(session_name)) or not session_name or bool(_AUTO_NAMED_PATTERN.match(session_name or ""))
         if regenerate_title or not session_name or _AUTO_NAMED_PATTERN.match(session_name):
             # generate_title logs its own failure detail and returns None rather
             # than raising, so a failure just leaves the current name standing.
@@ -3607,6 +3650,8 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             )
             generated_title = _apply_chinese_variant(generated_title)
             if generated_title:
+                automatic_title = True
+                existing_data["session_info"]["auto_title_base"] = generated_title
                 session_name = generated_title
                 existing_data["session_info"]["name"] = generated_title
                 print(f"TITLE:{session_name}", flush=True)
@@ -3646,6 +3691,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             # and "notes are stale" states.
             md_meta = {
                 'title': session_name,
+                'auto_title_base': session_name if automatic_title else None,
                 'date': existing_data.get('session_info', {}).get('processed_at', datetime.now().isoformat()),
                 'duration_seconds': existing_data.get('session_info', {}).get('duration_seconds'),
                 'language': output_language,
@@ -4107,12 +4153,17 @@ def regen_title(summary_file):
 
         # Update and save
         existing_data['session_info']['name'] = generated_title
+        existing_data['session_info']['auto_title_base'] = generated_title
         if summary_path.suffix == '.md':
             # Rewrite the title in the YAML front matter only
             text = summary_path.read_text(encoding='utf-8')
             import re
             escaped = generated_title.replace('\\', '\\\\').replace('"', '\\"')
             text = re.sub(r'^title:.*$', f'title: "{escaped}"', text, flags=re.MULTILINE)
+            if re.search(r'^auto_title_base:', text, re.MULTILINE):
+                text = re.sub(r'^auto_title_base:.*$', f'auto_title_base: "{escaped}"', text, flags=re.MULTILINE)
+            else:
+                text = re.sub(r'^title:.*$', f'title: "{escaped}"\nauto_title_base: "{escaped}"', text, count=1, flags=re.MULTILINE)
             _atomic_write_text(summary_path, text)
         else:
             with open(summary_path, 'w') as f:

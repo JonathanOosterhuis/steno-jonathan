@@ -1,3 +1,5 @@
+import { withParticipantTitle } from '@/lib/participantTitle';
+import { useUserName } from './useSettings';
 import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc, type Meeting, type UpdateMeetingPatch } from '@/lib/ipc';
@@ -14,16 +16,17 @@ export { meetingsKeys };
 // Re-exported for existing consumers that import them from here.
 export { LIVE_SUMMARY_PREFIX, liveRowRedundant };
 
-
 export function useMeetings() {
+  const ownName = useUserName().data;
   const query = useQuery({
     queryKey: meetingsKeys.list(),
     queryFn: async () => unwrap(await ipc().meetings.list()).meetings,
+    select: (meetings) => meetings.map((meeting) => withParticipantTitle(meeting, ownName)),
   });
 
   const recording = useRecording();
   const draft = useLiveDraftStore((s) =>
-    recording.sessionName ? s.drafts[recording.sessionName] : undefined,
+    recording.sessionName ? s.drafts[recording.sessionName] : undefined
   );
 
   // Local 1 Hz tick so the live row's duration_seconds advances smoothly
@@ -42,13 +45,7 @@ export function useMeetings() {
       return Math.max(0, Math.floor((nowMs - draft.startedAtMs) / 1000));
     }
     return recording.elapsed;
-  }, [
-    recording.sessionName,
-    recording.status,
-    recording.elapsed,
-    draft?.startedAtMs,
-    nowMs,
-  ]);
+  }, [recording.sessionName, recording.status, recording.elapsed, draft?.startedAtMs, nowMs]);
 
   const data = React.useMemo<Meeting[] | undefined>(() => {
     if (!query.data) return query.data;
@@ -61,13 +58,14 @@ export function useMeetings() {
     // can co-exist if the user is recording one note AND reprocessing
     // another simultaneously.
     const reprocessing = recording.reprocessingSummaryFiles;
-    const base = reprocessing.size > 0
-      ? query.data.map((m) =>
-          reprocessing.has(m.session_info.summary_file) && !m.is_processing
-            ? { ...m, is_processing: true }
-            : m,
-        )
-      : query.data;
+    const base =
+      reprocessing.size > 0
+        ? query.data.map((m) =>
+            reprocessing.has(m.session_info.summary_file) && !m.is_processing
+              ? { ...m, is_processing: true }
+              : m
+          )
+        : query.data;
     // Gate on the STATUS, not on the name alone: main keeps the session name
     // after a capture start that failed in the renderer, and without this a
     // stale name renders a live row that nothing ever clears. See
@@ -78,7 +76,7 @@ export function useMeetings() {
           draft?.title,
           draft?.startedAtMs,
           liveElapsed,
-          recording.status === 'processing',
+          recording.status === 'processing'
         )
       : null;
     if (!live) return base;
@@ -109,7 +107,7 @@ function buildLiveMeeting(
   draftTitle: string | undefined,
   startedAtMs: number | undefined,
   elapsedSeconds: number,
-  isProcessing: boolean,
+  isProcessing: boolean
 ): Meeting {
   const ts = startedAtMs ?? Date.now();
   const iso = new Date(ts).toISOString();
@@ -132,6 +130,7 @@ function buildLiveMeeting(
 }
 
 export function useMeeting(summaryFile: string | null | undefined) {
+  const ownName = useUserName().data;
   return useQuery({
     queryKey: meetingsKeys.detail(summaryFile),
     queryFn: async () => {
@@ -139,6 +138,7 @@ export function useMeeting(summaryFile: string | null | undefined) {
       const res = await ipc().meetings.get(summaryFile);
       return unwrap(res).meeting;
     },
+    select: (meeting) => (meeting ? withParticipantTitle(meeting, ownName) : null),
     enabled: !!summaryFile,
   });
 }
@@ -167,12 +167,10 @@ export function useUpdateUserNotes() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { summaryFile: string; userNotes: string }) =>
-      unwrap(
-        await ipc().meetings.update(args.summaryFile, { user_notes: args.userNotes }),
-      ),
+      unwrap(await ipc().meetings.update(args.summaryFile, { user_notes: args.userNotes })),
     onSuccess: (_data, args) => {
       qc.setQueryData<Meeting>(meetingsKeys.detail(args.summaryFile), (prev) =>
-        prev ? { ...prev, user_notes: args.userNotes } : prev,
+        prev ? { ...prev, user_notes: args.userNotes } : prev
       );
     },
   });
@@ -214,7 +212,7 @@ export function useDeleteMeeting() {
       // must not silently nuke the list if a malformed row slips through.
       if (deletedFile) {
         qc.setQueryData<Meeting[]>(meetingsKeys.list(), (prev) =>
-          prev?.filter((m) => m.session_info.summary_file !== deletedFile),
+          prev?.filter((m) => m.session_info.summary_file !== deletedFile)
         );
         // Drop the lazy-loaded detail cache for this meeting too. The list filter
         // above only touches the list query; without this, the deleted meeting's

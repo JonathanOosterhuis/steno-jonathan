@@ -1,3 +1,4 @@
+import { captureVoiceSampleStop } from './useBlobAudioPlayback';
 import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ipc } from '@/lib/ipc';
@@ -46,7 +47,7 @@ export function useSpeakerSidecarWatch(
   summaryFile: string | null | undefined,
   meetingStem: string | null,
   isDiarised: boolean,
-  hasSpeakerSidecar: boolean,
+  hasSpeakerSidecar: boolean
 ) {
   const qc = useQueryClient();
 
@@ -73,10 +74,7 @@ export function useSpeakerSidecarWatch(
   }, [qc, meetingStem, hasSpeakerSidecar]);
 }
 
-export function useSpeakerSuggestions(
-  meetingStem: string | null | undefined,
-  enabled = true,
-) {
+export function useSpeakerSuggestions(meetingStem: string | null | undefined, enabled = true) {
   return useQuery({
     queryKey: speakersKeys.suggestions(meetingStem),
     queryFn: async () => unwrap(await ipc().speakers.suggestForMeeting(meetingStem as string)),
@@ -101,8 +99,9 @@ interface ConfirmSpeakerArgs {
 export function useConfirmSpeaker() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: ConfirmSpeakerArgs) =>
-      unwrap(
+    mutationFn: async (args: ConfirmSpeakerArgs) => {
+      const stopSample = captureVoiceSampleStop();
+      const result = unwrap(
         await ipc().speakers.confirm({
           meetingStem: args.meetingStem,
           channel: args.channel,
@@ -111,8 +110,11 @@ export function useConfirmSpeaker() {
           personId: args.personId,
           newPersonName: args.newPersonName,
           summaryFile: args.summaryFile,
-        }),
-      ),
+        })
+      );
+      stopSample();
+      return result;
+    },
     // AWAITS the refetches (invalidateQueries' returned promise resolves
     // once actively-observed queries have refetched) -- without this, the
     // mutation (and any per-call onSuccess, e.g. the panel's confirmation
@@ -141,7 +143,8 @@ export function useConfirmSpeaker() {
 export function useCreatePersonProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (displayName: string) => unwrap(await ipc().speakers.createProfile(displayName)),
+    mutationFn: async (displayName: string) =>
+      unwrap(await ipc().speakers.createProfile(displayName)),
     onSuccess: () => qc.invalidateQueries({ queryKey: speakersKeys.profiles() }),
   });
 }
@@ -156,7 +159,12 @@ export function useRenamePersonProfile() {
     // the display_name a currently-open meeting's confirmed_by_user/
     // suggested_name would show, so a narrower invalidation would leave a
     // stale old name on screen until some unrelated refetch happened to fire.
-    onSuccess: () => qc.invalidateQueries({ queryKey: speakersKeys.all }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: speakersKeys.all }),
+        qc.invalidateQueries({ queryKey: meetingsKeys.all }),
+      ]);
+    },
   });
 }
 
@@ -194,8 +202,8 @@ export function useGetSpeakerSampleAudio() {
           args.channel,
           args.diarizationSpeakerId,
           args.expectedRunId,
-          args.segmentIndex,
-        ),
+          args.segmentIndex
+        )
       ),
   });
 }

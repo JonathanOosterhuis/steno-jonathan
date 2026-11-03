@@ -25,6 +25,7 @@ export type Result<T> = ({ success: true } & T) | {
 
 // ---------- domain types ----------
 export interface SessionInfo {
+  auto_title_base?: string | null;
   name: string;
   summary_file: string;
   transcript_file?: string;

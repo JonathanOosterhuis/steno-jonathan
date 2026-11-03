@@ -1,3 +1,4 @@
+import { MicrophoneRecoveryBanner } from '@/components/MicrophoneRecoveryBanner';
 import * as React from 'react';
 
 import { useTheme } from '@/hooks/useTheme';
@@ -48,10 +49,13 @@ async function hasInstalledTranscriptionModel() {
     ipc().parakeetModels.status(),
     ipc().whisperModels.list(),
   ]);
-  return (parakeet.success && parakeet.installed === true) ||
-    (whisper.success && Object.values(whisper.supported_models ?? {}).some(
-      model => (model as { installed?: boolean }).installed === true,
-    ));
+  return (
+    (parakeet.success && parakeet.installed === true) ||
+    (whisper.success &&
+      Object.values(whisper.supported_models ?? {}).some(
+        (model) => (model as { installed?: boolean }).installed === true
+      ))
+  );
 }
 
 export function App() {
@@ -88,8 +92,6 @@ export function App() {
     if (privacyNotice.data === undefined) return;
     document.documentElement.dataset.privacyGate = String(privacyNotice.data);
   }, [privacyNotice.data]);
-
-
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.stenoai) return;
@@ -182,7 +184,7 @@ export function App() {
     didSetupGateRef.current = true;
     (async () => {
       try {
-        if (!await hasInstalledTranscriptionModel()) {
+        if (!(await hasInstalledTranscriptionModel())) {
           setInitialSetup(true);
         }
       } catch {
@@ -196,8 +198,11 @@ export function App() {
   React.useEffect(() => {
     if (!setupGateResolved || !initialSetup || didSetupRedirectRef.current) return;
     const onNeutralRoute = route === '/' || route === '' || route === '/meetings';
-    const busy = recording.isLoading || recording.status === 'recording' ||
-      recording.status === 'paused' || recording.status === 'processing';
+    const busy =
+      recording.isLoading ||
+      recording.status === 'recording' ||
+      recording.status === 'paused' ||
+      recording.status === 'processing';
     if (!onNeutralRoute || busy) return;
     let cancelled = false;
     // A model may have been installed in Settings since the startup check.
@@ -213,7 +218,9 @@ export function App() {
         // A failed check must not send a configured user back through setup.
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [setupGateResolved, initialSetup, recording.isLoading, recording.status, route]);
 
   const isProcessingRoute = route === '/meetings/processing';
@@ -238,8 +245,7 @@ export function App() {
     route === '/dev' ||
     route.startsWith('/dev/');
   const showAskBar = !isProcessingRoute && !isChatRoute && !isChromeRoute;
-  const recordingActive =
-    recording.status === 'recording' || recording.status === 'paused';
+  const recordingActive = recording.status === 'recording' || recording.status === 'paused';
 
   return (
     <WhatsNewProvider
@@ -248,18 +254,18 @@ export function App() {
       suppressed={!setupGateResolved || privacyNotice.isPending || showPrivacyModal}
       blocked={recording.isLoading || recordingActive || recording.status === 'processing'}
     >
-    <CommandPaletteProvider>
-      <CommandPaletteHotkey />
-      <StreamingProvider>
-      <AskBarProvider>
-        <RouteView route={route} />
-        <QuitDialog />
-        <KeychainWaitBanner />
-        {route !== '/setup' && <RecordingRecovery />}
-        <PrivacyConsentModal open={showPrivacyModal} />
-        <ImportDropZone />
+      <CommandPaletteProvider>
+        <CommandPaletteHotkey />
+        <StreamingProvider>
+          <AskBarProvider>
+            <RouteView route={route} />
+            <QuitDialog />
+            <KeychainWaitBanner />
+            {route !== '/setup' && <RecordingRecovery />}
+            <PrivacyConsentModal open={showPrivacyModal} />
+            <ImportDropZone />
 
-        {/* Bottom dock — shared anchor across recording → processing → meeting.
+            {/* Bottom dock — shared anchor across recording → processing → meeting.
             Recording is status-driven, not route-driven: PrimaryDock docks the
             transcription pill next to the Ask bar while a recording is
             active (or swaps in the expanded LiveTranscriptBar), and falls back
@@ -267,37 +273,38 @@ export function App() {
             route — UNLESS a new recording is active (back-to-back notes: note
             A processing while note B records); the recording's pill + Stop
             must stay reachable everywhere, so recording wins the slot. */}
-        <BottomDockSlot>
-          {isProcessingRoute && !recordingActive && <ProcessingDock />}
-          <PrimaryDock showAskBar={showAskBar} />
-        </BottomDockSlot>
+            <BottomDockSlot>
+              {isProcessingRoute && !recordingActive && <ProcessingDock />}
+              <PrimaryDock showAskBar={showAskBar} />
+            </BottomDockSlot>
 
-        {/* Transcript — floats above the chat bar (only on real meeting routes).
+            {/* Transcript — floats above the chat bar (only on real meeting routes).
             Coexistence invariant: both 72-band panels self-gate on a *saved*
             meeting (activeSummaryFile), and the note being recorded is unsaved
             — so during a recording they can only ever concern a saved meeting
             the user is viewing, never fight the live pill row below. */}
-        {showAskBar && (
-          <BottomDockSlot bottomOffset={72}>
-            <TranscriptBar />
-          </BottomDockSlot>
-        )}
+            {showAskBar && (
+              <BottomDockSlot bottomOffset={72}>
+                <TranscriptBar />
+              </BottomDockSlot>
+            )}
 
-        {/* Generate-notes CTA — floats just above the chat bar for a
+            {/* Generate-notes CTA — floats just above the chat bar for a
             transcript-only note (auto-summarise off). Self-hides when notes
             exist or the transcript panel is open. Shares the bottomOffset={72}
             band with TranscriptBar above; the two stay non-overlapping because
             they're mutually exclusive on `transcriptOpen` (TranscriptBar shows
             only when open, this hides when open) — keep that invariant if either
             gate changes. */}
-        {showAskBar && (
-          <BottomDockSlot bottomOffset={72}>
-            <GenerateNotesBar />
-          </BottomDockSlot>
-        )}
-      </AskBarProvider>
-      </StreamingProvider>
-    </CommandPaletteProvider>
+            {showAskBar && (
+              <BottomDockSlot bottomOffset={72}>
+                <GenerateNotesBar />
+              </BottomDockSlot>
+            )}
+            <MicrophoneRecoveryBanner />
+          </AskBarProvider>
+        </StreamingProvider>
+      </CommandPaletteProvider>
     </WhatsNewProvider>
   );
 }

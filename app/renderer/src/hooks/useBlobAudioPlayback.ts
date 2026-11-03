@@ -13,6 +13,14 @@ interface ActivePlayback {
 
 let activePlayback: ActivePlayback | null = null;
 
+/** Stop only the sample active at approval time, never a later selection. */
+export function captureVoiceSampleStop(): () => void {
+  const captured = activePlayback;
+  return () => {
+    if (captured && activePlayback === captured) captured.stop();
+  };
+}
+
 function audioBlobUrl(base64: string, mimeType = 'audio/wav'): string {
   const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
   return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
@@ -29,7 +37,7 @@ function releaseResource(resource: AudioResource | null): void {
 
 /** One fetch-on-click audio lifecycle shared by every voice-sample surface. */
 export function useBlobAudioPlayback<Key extends string>(
-  loadBase64: (key: Key) => Promise<string>,
+  loadBase64: (key: Key) => Promise<string>
 ) {
   const loaderRef = React.useRef(loadBase64);
   React.useEffect(() => {
@@ -70,71 +78,71 @@ export function useBlobAudioPlayback<Key extends string>(
     };
   }, [releaseCurrent]);
 
-  const toggle = React.useCallback(async (key: Key) => {
-    if (!mountedRef.current) return;
-    if (playingKey === key) {
-      stop();
-      return;
-    }
-
-    stop();
-    const previousPlayback = activePlayback;
-    if (previousPlayback && previousPlayback.owner !== ownerRef.current) {
-      previousPlayback.stop();
-    }
-    activePlayback = { owner: ownerRef.current, stop };
-    setErrorKey(null);
-    setPendingKey(key);
-    const generation = generationRef.current;
-    let resource: AudioResource | null = null;
-
-    try {
-      const base64 = await loaderRef.current(key);
-      if (!mountedRef.current || generation !== generationRef.current) return;
-
-      const objectUrl = audioBlobUrl(base64);
-      const audio = new Audio(objectUrl);
-      resource = { audio, objectUrl, released: false };
-      resourceRef.current = resource;
-
-      const finish = (failed: boolean) => {
-        if (generation !== generationRef.current || resourceRef.current !== resource) return;
-        resourceRef.current = null;
-        releaseResource(resource);
-        if (activePlayback?.owner === ownerRef.current) activePlayback = null;
-        if (!mountedRef.current) return;
-        setPendingKey(null);
-        setPlayingKey(null);
-        if (failed) setErrorKey(key);
-      };
-      audio.onended = () => finish(false);
-      audio.onerror = () => finish(true);
-
-      await audio.play();
-      if (!mountedRef.current || generation !== generationRef.current) {
-        releaseResource(resource);
+  const toggle = React.useCallback(
+    async (key: Key) => {
+      if (!mountedRef.current) return;
+      if (playingKey === key) {
+        stop();
         return;
       }
-      setPlayingKey(key);
-    } catch {
-      if (resourceRef.current === resource) resourceRef.current = null;
-      releaseResource(resource);
-      if (
-        generation === generationRef.current
-        && activePlayback?.owner === ownerRef.current
-      ) {
-        activePlayback = null;
+
+      stop();
+      const previousPlayback = activePlayback;
+      if (previousPlayback && previousPlayback.owner !== ownerRef.current) {
+        previousPlayback.stop();
       }
-      if (mountedRef.current && generation === generationRef.current) {
-        setPlayingKey(null);
-        setErrorKey(key);
+      activePlayback = { owner: ownerRef.current, stop };
+      setErrorKey(null);
+      setPendingKey(key);
+      const generation = generationRef.current;
+      let resource: AudioResource | null = null;
+
+      try {
+        const base64 = await loaderRef.current(key);
+        if (!mountedRef.current || generation !== generationRef.current) return;
+
+        const objectUrl = audioBlobUrl(base64);
+        const audio = new Audio(objectUrl);
+        resource = { audio, objectUrl, released: false };
+        resourceRef.current = resource;
+
+        const finish = (failed: boolean) => {
+          if (generation !== generationRef.current || resourceRef.current !== resource) return;
+          resourceRef.current = null;
+          releaseResource(resource);
+          if (activePlayback?.owner === ownerRef.current) activePlayback = null;
+          if (!mountedRef.current) return;
+          setPendingKey(null);
+          setPlayingKey(null);
+          if (failed) setErrorKey(key);
+        };
+        audio.onended = () => finish(false);
+        audio.onerror = () => finish(true);
+
+        await audio.play();
+        if (!mountedRef.current || generation !== generationRef.current) {
+          releaseResource(resource);
+          return;
+        }
+        setPlayingKey(key);
+      } catch {
+        if (resourceRef.current === resource) resourceRef.current = null;
+        releaseResource(resource);
+        if (generation === generationRef.current && activePlayback?.owner === ownerRef.current) {
+          activePlayback = null;
+        }
+        if (mountedRef.current && generation === generationRef.current) {
+          setPlayingKey(null);
+          setErrorKey(key);
+        }
+      } finally {
+        if (mountedRef.current && generation === generationRef.current) {
+          setPendingKey(null);
+        }
       }
-    } finally {
-      if (mountedRef.current && generation === generationRef.current) {
-        setPendingKey(null);
-      }
-    }
-  }, [playingKey, stop]);
+    },
+    [playingKey, stop]
+  );
 
   return { errorKey, pendingKey, playingKey, stop, toggle };
 }

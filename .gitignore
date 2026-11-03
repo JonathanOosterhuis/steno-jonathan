@@ -213,3 +213,6 @@ config.json.lock
 bin-custom/
 custom/HANDOVER.md
 app/build-info.json
+
+# Local extracted app staging
+/bundle/
