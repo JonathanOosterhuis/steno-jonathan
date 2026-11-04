@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/electron';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import path from 'path';
 
 test('chosen window is saved through real IPC, stops, and is not reused', async ({ launchApp, userDataDir }, testInfo) => {
@@ -11,9 +11,9 @@ test('chosen window is saved through real IPC, stops, and is not reused', async 
     }];
   });
   await page.evaluate(() => { location.hash = '#/settings?tab=general'; });
-  await page.getByRole('button', { name: 'Choose a window' }).waitFor();
+  await page.getByRole('button', { name: 'Choose a window manually' }).waitFor();
   await page.screenshot({ path: testInfo.outputPath('settings.png') });
-  await page.getByRole('button', { name: 'Choose a window' }).click();
+  await page.getByRole('button', { name: 'Choose a window manually' }).click();
   await page.getByRole('button', { name: 'Snapshot test slides' }).waitFor();
   await page.screenshot({ path: testInfo.outputPath('picker.png') });
   await page.getByRole('button', { name: 'Snapshot test slides' }).click();
@@ -60,4 +60,47 @@ test('@native real selected window capture', async ({ launchApp, userDataDir }) 
   expect(readFileSync(path.join(folder, '0000.jpg')).length).toBeGreaterThan(5000);
   await page.evaluate(() => window.stenoai.recording.closeSystemAudioFile());
   expect(existsSync(folder)).toBe(false);
+});
+
+
+test('automatic Teams mode persists through the settings bridge', async ({ launchApp, userDataDir }) => {
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
+  const status = await page.evaluate(() => window.stenoai.screenSnapshots.status());
+  test.skip(!status.success || !status.supported, 'macOS Teams only');
+  await page.evaluate(() => { location.hash = '#/settings?tab=general'; });
+  await page.getByRole('switch', { name: 'Automatic Teams snapshots' }).click();
+  await expect(page.getByRole('switch', { name: 'Automatic Teams snapshots' })).toHaveAttribute('aria-checked', 'true');
+  expect(JSON.parse(readFileSync(path.join(userDataDir, 'screen-snapshot-settings.json'), 'utf8')).automaticTeams).toBe(true);
+  await page.evaluate(() => window.stenoai.screenSnapshots.automatic(false));
+  expect(JSON.parse(readFileSync(path.join(userDataDir, 'screen-snapshot-settings.json'), 'utf8')).automaticTeams).toBe(false);
+});
+
+test('@teams live desktop sharing is detected without selecting a window', async ({ launchApp, userDataDir }, testInfo) => {
+  test.skip(process.env.STENOAI_E2E_TEAMS_SHARE !== '1', 'Requires the authorized synthetic Teams test meeting');
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
+  expect((await page.evaluate(() => window.stenoai.screenSnapshots.automatic(true))).success).toBe(true);
+  const result = await page.evaluate(() => window.stenoai.recording.openSystemAudioFile('Teams synthetic share'));
+  if (!result.success) throw new Error(result.error);
+  const folder = path.join(userDataDir, 'screen-snapshots', path.basename(result.filePath, '.webm'));
+  await expect.poll(async () => page.evaluate(() => window.stenoai.screenSnapshots.status()), { timeout: 20000 }).toMatchObject({ automatic: true, detection: 'sharing', count: 1 });
+  const bytes = readFileSync(path.join(folder, '0000.jpg'));
+  expect(bytes.length).toBeGreaterThan(5000);
+  writeFileSync(testInfo.outputPath('teams-shared-content.jpg'), bytes);
+  await testInfo.attach('teams-shared-content', { body: bytes, contentType: 'image/jpeg' });
+  await page.evaluate(() => window.stenoai.recording.closeSystemAudioFile());
+  expect(existsSync(folder)).toBe(false);
+  await expect.poll(async () => page.evaluate(() => window.stenoai.screenSnapshots.status())).toMatchObject({ automatic: true, active: false, detection: 'idle' });
+});
+
+
+test('@teams-idle no snapshots without incoming shared content', async ({ launchApp, userDataDir }) => {
+  test.skip(process.env.STENOAI_E2E_TEAMS_IDLE !== '1', 'Requires the private Teams meeting with sharing stopped');
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
+  await page.evaluate(() => window.stenoai.screenSnapshots.automatic(true));
+  const result = await page.evaluate(() => window.stenoai.recording.openSystemAudioFile('Teams no share'));
+  if (!result.success) throw new Error(result.error);
+  await expect.poll(async () => page.evaluate(() => window.stenoai.screenSnapshots.status()), { timeout: 20000 }).toMatchObject({ automatic: true, detection: 'waiting', count: 0, selected: null });
+  const folder = path.join(userDataDir, 'screen-snapshots', path.basename(result.filePath, '.webm'));
+  expect(existsSync(folder)).toBe(false);
+  await page.evaluate(() => window.stenoai.recording.closeSystemAudioFile());
 });

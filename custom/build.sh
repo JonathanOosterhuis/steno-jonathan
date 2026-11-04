@@ -44,6 +44,9 @@ mkdir -p bin-custom
 swiftc -O -target arm64-apple-macos14.0 custom/calendar-helper/steno-calendar.swift \
   -o bin-custom/steno-calendar
 
+echo "==> Teams shared-content helper"
+swiftc -O -target arm64-apple-macos14.0 custom/teams-share-helper/steno-teams-share.swift -o bin-custom/steno-teams-share
+
 echo "==> Electron app"
 custom/package.sh
 

@@ -129,7 +129,7 @@
   "integrationsTab.many_issues": "{{count}} sync issues",
   "privacy.optionalAnalytics": "Anonymous usage analytics is off by default. If enabled, it sends crash and usage signals to StenoLabs via PostHog, excluding meeting content. Launch on login is a separate setting. You can change either preference anytime in Settings.",
   "snapshots.title": "Screen snapshots",
-  "snapshots.choose": "Choose a window",
+  "snapshots.choose": "Choose a window manually",
   "snapshots.off": "Off. Choose a window to include its content in this conversation.",
   "snapshots.selected": "{{name}} · {{count}} snapshots saved",
   "snapshots.stop": "Stop snapshots",
@@ -148,5 +148,10 @@
   "people.rename.fullName": "Full name",
   "people.rename.cancel": "Cancel",
   "people.rename.saving": "Saving…",
-  "people.rename.save": "Save"
+  "people.rename.save": "Save",
+  "snapshots.automatic": "Automatic Teams snapshots",
+  "snapshots.waiting": "Enabled. Waiting for shared content during recording.",
+  "snapshots.access": "Allow StenoAI in System Settings > Privacy & Security > Accessibility to detect shared content.",
+  "snapshots.ambiguous": "Multiple shared screens found. Snapshots are paused until one remains.",
+  "snapshots.teamsHelp": "Automatically saves the shared-content area in the Teams desktop app during recording. Requires Accessibility and Screen Recording access. Keep the meeting window visible. English Teams interface supported."
 }

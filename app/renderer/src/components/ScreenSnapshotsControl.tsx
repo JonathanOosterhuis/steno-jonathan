@@ -42,6 +42,18 @@ export function ScreenSnapshotsControl() {
       setBusy(false);
     }
   }
+  async function toggleAutomatic() {
+    setBusy(true);
+    setError('');
+    try {
+      unwrap(await ipc().screenSnapshots.automatic(!status.data?.automatic));
+      await queryClient.invalidateQueries({ queryKey: ['screenSnapshots'] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('snapshots.failed'));
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="my-4 rounded-lg border border-[color:var(--border)] p-4 text-sm">
       <div className="flex items-center justify-between gap-3">
@@ -53,9 +65,26 @@ export function ScreenSnapshotsControl() {
           <p className="mt-1 text-[color:var(--fg-2)]">
             {status.data?.selected
               ? t('snapshots.selected', { name: status.data.selected, count: status.data.count })
-              : t('snapshots.off')}
+              : status.data?.automatic
+                ? status.data.detection === 'access-required'
+                  ? t('snapshots.access')
+                  : status.data.detection === 'ambiguous'
+                    ? t('snapshots.ambiguous')
+                    : t('snapshots.waiting')
+                : t('snapshots.off')}
           </p>
         </div>
+        {status.data?.supported && (
+          <Button
+            variant={status.data.automatic ? 'default' : 'outline'}
+            role="switch"
+            aria-checked={status.data.automatic}
+            disabled={busy}
+            onClick={() => void toggleAutomatic()}
+          >
+            {t('snapshots.automatic')}
+          </Button>
+        )}
         <Button variant="outline" onClick={() => setOpen(true)}>
           {t('snapshots.choose')}
         </Button>
@@ -65,6 +94,7 @@ export function ScreenSnapshotsControl() {
           </Button>
         )}
       </div>
+      <p className="mt-2 text-xs text-[color:var(--fg-2)]">{t('snapshots.teamsHelp')}</p>
       {(error || status.data?.error || status.error) && (
         <p role="alert" className="mt-2 text-[color:var(--fg-2)]">
           {error || status.data?.error || t('snapshots.failed')}

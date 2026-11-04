@@ -1,20 +1,35 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { cropSharedContent } = require('./teams-share');
 
-// Only explicit window selections are accepted; never substitute a whole screen.
-function createScreenSnapshots({ getUserDataDir, getSources, getRecordingState, getElapsedSeconds }) {
+// Auto mode accepts only an affirmative Teams share and crops to its content region.
+function createScreenSnapshots({ getUserDataDir, getSources, getRecordingState, getElapsedSeconds, detectTeamsShare = null }) {
   let selected = null;
   let session = null;
   let generation = 0;
   let busy = false;
   let timer = null;
   let error = null;
+  let detection = 'idle';
+  const settingsPath = () => path.join(getUserDataDir(), 'screen-snapshot-settings.json');
+  let automatic = false;
+  try { automatic = !!detectTeamsShare && JSON.parse(fs.readFileSync(settingsPath(), 'utf8')).automaticTeams === true; } catch (_) { /* opt in */ }
+  function setAutomatic(enabled) {
+    if (typeof enabled !== 'boolean' || !detectTeamsShare) throw new Error('Automatic Teams snapshots are unavailable.');
+    fs.mkdirSync(getUserDataDir(), { recursive: true });
+    fs.writeFileSync(settingsPath() + '.tmp', JSON.stringify({ automaticTeams: enabled }), { mode: 0o600 });
+    fs.renameSync(settingsPath() + '.tmp', settingsPath());
+    invalidate(); automatic = enabled; selected = null; error = null; detection = 'idle';
+    if (session) session.previous = null;
+    void tick();
+    return status();
+  }
   const root = () => path.join(getUserDataDir(), 'screen-snapshots');
   const status = () => ({ selected: selected?.name || null, count: session?.frames.length || 0,
-    active: !!session && !!selected && !getRecordingState().isPaused, error });
+    active: !!session && !!selected && !getRecordingState().isPaused, error, automatic, supported: !!detectTeamsShare, detection });
   const invalidate = () => { generation += 1; };
-  const stop = () => { invalidate(); clearInterval(timer); timer = null; selected = null; session = null; error = null; };
+  const stop = () => { invalidate(); clearInterval(timer); timer = null; selected = null; session = null; error = null; detection = 'idle'; };
   async function sources() {
     const items = await getSources({ types: ['window'], thumbnailSize: { width: 1600, height: 1000 } });
     return items.filter(s => s.id.startsWith('window:'));
@@ -25,6 +40,7 @@ function createScreenSnapshots({ getUserDataDir, getSources, getRecordingState, 
       preview: s.thumbnail.resize({ width: 320 }).toDataURL() }));
   }
   async function select(id) {
+    if (automatic) setAutomatic(false);
     if (id === null) { invalidate(); selected = null; error = null; return status(); }
     const token = generation;
     const items = await sources();
@@ -61,18 +77,38 @@ function createScreenSnapshots({ getUserDataDir, getSources, getRecordingState, 
     return session;
   }
   async function tick() {
-    if (busy || !session || !selected || getRecordingState().isPaused) return;
+    if (busy || !session || (!selected && !automatic) || getRecordingState().isPaused) return;
     if (session.frames.length >= 120) { error = 'Snapshot limit reached (120). Audio recording continues.'; return; }
     busy = true;
-    const token = generation, current = session, sourceId = selected.id;
+    const token = generation, current = session;
     const seconds = current.offset + getElapsedSeconds();
     try {
+      let target = null;
+      if (automatic) {
+        const result = await detectTeamsShare();
+        if (generation !== token || session !== current || getRecordingState().isPaused) return;
+        detection = result.state;
+        if (result.state !== 'sharing') { selected = null; current.previous = null; error = null; return; }
+        target = result.target;
+      }
+      const sourceId = target ? `window:${target.windowId}:0` : selected.id;
       const item = (await sources()).find(s => s.id === sourceId);
+      // Recheck after capture: a stopped share or changed layout must not save gallery/chat pixels.
+      if (target) {
+        const again = await detectTeamsShare();
+        if (generation !== token || session !== current || getRecordingState().isPaused) return;
+        if (again.state !== 'sharing' || again.target.windowId !== target.windowId || ['x', 'y', 'width', 'height'].some(k => again.target.region[k] !== target.region[k])) {
+          selected = null; current.previous = null; detection = again.state; return;
+        }
+      }
       if (generation !== token || session !== current || getRecordingState().isPaused) return;
       if (!item || item.thumbnail.isEmpty()) {
+        if (automatic) { selected = null; detection = 'waiting'; return; }
         invalidate(); selected = null; error = 'Selected window is unavailable. Choose it again to resume snapshots.'; return;
       }
-      const bitmap = item.thumbnail.resize({ width: 64, height: 40 }).toBitmap();
+      const thumbnail = target ? cropSharedContent(item.thumbnail, target) : item.thumbnail;
+      if (target) selected = { id: sourceId, name: 'Teams' };
+      const bitmap = thumbnail.resize({ width: 64, height: 40 }).toBitmap();
       if (current.previous && current.previous.length === bitmap.length) {
         let delta = 0;
         for (let i = 0; i < bitmap.length; i += 4) {
@@ -83,14 +119,14 @@ function createScreenSnapshots({ getUserDataDir, getSources, getRecordingState, 
       const dir = path.join(root(), current.stem);
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       const filename = `${String(current.frames.length).padStart(4, '0')}.jpg`;
-      const bytes = item.thumbnail.toJPEG(80);
+      const bytes = thumbnail.toJPEG(80);
       if (bytes.length > 4 * 1024 * 1024) throw new Error('Snapshot too large.');
       fs.writeFileSync(path.join(dir, filename), bytes, { mode: 0o600 });
       current.frames.push({ file: filename, seconds });
       fs.writeFileSync(path.join(dir, 'manifest.tmp'), JSON.stringify({ version: 1, frames: current.frames }), { mode: 0o600 });
       fs.renameSync(path.join(dir, 'manifest.tmp'), path.join(dir, 'manifest.json'));
       current.previous = bitmap; error = null;
-    } catch (_) { if (generation === token) error = 'Could not save screen snapshots. Audio recording continues.'; }
+    } catch (_) { if (generation === token) { if (automatic) { selected = null; detection = 'error'; } error = 'Could not save screen snapshots. Audio recording continues.'; } }
     finally { busy = false; }
   }
   function discard(current) {
@@ -108,6 +144,6 @@ function createScreenSnapshots({ getUserDataDir, getSources, getRecordingState, 
     if (!stem || path.basename(stem) !== stem || stem === '.' || stem === '..') return;
     fs.rmSync(path.join(root(), stem), { recursive: true, force: true });
   }
-  return { list, select, start, stop, invalidate, tick, status, remove, discard };
+  return { list, select, setAutomatic, start, stop, invalidate, tick, status, remove, discard };
 }
 module.exports = { createScreenSnapshots };

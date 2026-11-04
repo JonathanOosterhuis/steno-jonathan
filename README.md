@@ -4,7 +4,9 @@ Personal source repository based on [Zaklamp02/StenoAI](https://github.com/Zakla
 
 ## Screen snapshots
 
-In Settings > Preferences or on the active recording page, choose **Screen snapshots > Choose a window**. Select the presentation or call window. Only that window is saved; this version does not automatically detect the shared-presentation region inside a call. Selection is cleared when recording stops and must be made again for a new conversation.
+In Settings > Preferences or on the active recording page, enable **Automatic Teams snapshots** once. During recording, Steno detects incoming shared content in the Microsoft Teams desktop app and saves only that content area. The preference persists between recordings. This macOS integration currently supports the English Teams interface and requires Accessibility and Screen Recording permission. Keep the Teams meeting window visible; minimized, unavailable, or ambiguous shares are skipped. Teams UI changes may require updating detection.
+
+**Choose a window manually** remains available for other apps. It disables automatic mode and captures the selected window in full for this recording only.
 
 During recording the app checks every 10 seconds, skips near-identical images, pauses with audio, and saves at most 120 JPEG snapshots. A missing window stops snapshots with a visible warning; the app never switches to another window or the whole display. Continued recordings append images to the original note with adjusted timestamps.
 

@@ -5619,8 +5619,16 @@ const screenSnapshots = require('./screen-snapshots').createScreenSnapshots({
   getSources: (options) => desktopCapturer.getSources(options),
   getRecordingState: () => recordingRuntimeState,
   getElapsedSeconds: getRecordingElapsedSeconds,
+  detectTeamsShare: process.platform === 'darwin' ? require('./teams-share').createTeamsShareDetector({
+    platform: process.platform,
+    helperPath: app.isPackaged ? path.join(process.resourcesPath, 'steno-teams-share') : path.join(__dirname, '../bin-custom/steno-teams-share'),
+  }) : null,
 });
 ipcMain.handle('screen-snapshots-status', () => ({ success: true, ...screenSnapshots.status() }));
+ipcMain.handle('screen-snapshots-automatic', (_event, enabled) => {
+  try { return { success: true, ...screenSnapshots.setAutomatic(enabled) }; }
+  catch (error) { return { success: false, error: error.message }; }
+});
 ipcMain.handle('screen-snapshots-list', async () => {
   try { return { success: true, sources: await screenSnapshots.list() }; }
   catch (_) { return { success: false, error: 'Cannot list windows. Allow Screen Recording in System Settings and try again.' }; }

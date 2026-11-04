@@ -110,6 +110,7 @@ const stenoai = {
 
   screenSnapshots: {
     status: () => invoke('screen-snapshots-status'),
+    automatic: (enabled) => invoke('screen-snapshots-automatic', enabled),
     list: () => invoke('screen-snapshots-list'),
     select: (id) => invoke('screen-snapshots-select', id),
   },
