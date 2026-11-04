@@ -2462,3 +2462,40 @@ def extract_speaker_sample_audio(
     except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning("Could not extract speaker sample audio: %s", e)
         return False
+
+
+def suggested_title_names(meeting_stem: str, sidecar: dict, profiles: list) -> list:
+    """Read-only title hints using the same merged clusters and scores as review.
+
+    Actual assignments override a guess for that cluster. Mixed, explicitly
+    unnamed and likely echo-artifact clusters never contribute a guessed name.
+    This does not update participants, prototypes or transcript labels.
+    """
+    channels = sidecar.get("channels") or {}
+    merged = {
+        channel: merge_same_channel_fragments(
+            clusters_from_sidecar_channel(meeting_stem, value)
+        )[0]
+        for channel, value in channels.items()
+    }
+    suggestions = suggest_speakers_for_meeting(merged, profiles)
+    run_id = (sidecar.get("diarization_run") or {}).get("run_id")
+    names = []
+    for channel, results in suggestions.items():
+        for sid, result in results.items():
+            context = merged[channel][sid][1]
+            if context.contains_multiple_speakers or context.review_state:
+                continue
+            fragments = {sid, *context.merged_from}
+            assigned = next((person.get("display_name") for person in profiles
+                             if any(p.get("meeting_id") == meeting_stem
+                                    and p.get("diarization_speaker_id") in fragments
+                                    and prototype_channel_matches(p, channel, context.recording_type)
+                                    and prototype_run_matches(p, run_id)
+                                    for p in person.get("prototypes", []))), None)
+            average = context.speech_duration_seconds / context.segment_count if context.segment_count else 0
+            name = assigned or (result.suggested_name if result.status in {"confirmed", "possible"}
+                                and average >= SUGGESTION_MIN_AVG_TURN_SECONDS else None)
+            if name and name not in names:
+                names.append(name)
+    return names

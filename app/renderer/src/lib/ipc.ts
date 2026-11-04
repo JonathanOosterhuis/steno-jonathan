@@ -67,6 +67,8 @@ export interface Meeting {
   session_info: SessionInfo;
   summary: string;
   participants?: unknown[];
+  /** Read-only identity suggestions for display titles; not confirmed attendance. */
+  suggested_participants?: string[];
   discussion_areas?: unknown[];
   key_points?: string[];
   action_items?: unknown[];
@@ -1114,6 +1116,37 @@ export interface StenoaiBridge {
     requestMicrophone: RequestFn<[], MicPermissionGrantResponse>;
   };
 
+  screenSnapshots: {
+    meeting: RequestFn<[summaryFile: string], Result<{ frames: { file: string; seconds: number; preview: string | null; available: boolean }[] }>>;
+    view: RequestFn<[summaryFile: string, file: string], Result<{ image: string }>>;
+    save: RequestFn<[summaryFile: string, file?: string], Result<{ canceled: boolean; count?: number }>>;
+    automatic: RequestFn<[enabled: boolean], Result<Record<string, unknown>>>;
+    status: RequestFn<
+      [],
+      Result<{
+        selected: string | null;
+        count: number;
+        active: boolean;
+        error: string | null;
+        automatic: boolean;
+        supported: boolean;
+        detection: string;
+      }>
+    >;
+    list: RequestFn<[], Result<{ sources: { id: string; name: string; preview: string }[] }>>;
+    select: RequestFn<
+      [id: string | null],
+      Result<{
+        selected: string | null;
+        count: number;
+        active: boolean;
+        error: string | null;
+        automatic: boolean;
+        supported: boolean;
+        detection: string;
+      }>
+    >;
+  };
   recording: {
     recoverable: RequestFn<[], Result<{ recordings: { id: string; name: string; updatedAt: string; bytes: number }[] }>>;
     recover: RequestFn<[id: string], Result<Record<string, never>>>;

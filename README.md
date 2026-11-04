@@ -2,7 +2,23 @@
 
 Personal source repository based on [Zaklamp02/StenoAI](https://github.com/Zaklamp02/StenoAI), preserving upstream history and licensing.
 
+## Screen snapshots
+
+In Settings > Preferences or on the active recording page, enable **Automatic Teams snapshots** once. During recording, Steno detects incoming shared content in the Microsoft Teams desktop app and saves only that content area. The preference persists between recordings. This macOS integration currently supports the English Teams interface and requires Accessibility and Screen Recording permission. Keep the Teams meeting window visible; minimized, unavailable, or ambiguous shares are skipped. Teams UI changes may require updating detection.
+
+**Choose a window manually** remains available for other apps. It disables automatic mode and captures the selected window in full for this recording only.
+
+During recording the app checks every 10 seconds, skips near-identical images, pauses with audio, and saves at most 120 JPEG snapshots. A missing window stops snapshots with a visible warning; the app never switches to another window or the whole display. Continued recordings append images to the original note with adjusted timestamps.
+
+When generating notes or a report, up to 16 images sampled across the timeline are read by the local Ollama vision model `gemma3:4b`. Install this model in Ollama if it is missing. Images remain local. Their bounded, timestamped text descriptions are sent to your configured notes provider, including a cloud provider if selected. Visual evidence is labeled separately from spoken decisions and authored notes. A vision failure preserves ordinary transcript-based notes and adds a retry warning.
+
+Each recording has a **Snapshots** gallery with recording timestamps. Open a thumbnail for the full image, choose **Download image** to save one original JPG, or **Download all** to save all originals in a newly created folder at your chosen location. Canceling an export leaves the originals untouched.
+
+Snapshots and cached descriptions live under the app user-data directory in `screen-snapshots/<meeting-stem>/`. Deleting a meeting after its undo window also removes these files. Tests use isolated directories and synthetic images.
+
 ## Current state
+
+Automatic meeting titles include both confirmed and suggested speaker names, excluding your own name. Suggestions remain unconfirmed and do not alter voice profiles or transcript labels. Manually edited titles are preserved.
 
 The local customizations are committed here: microphone recovery, recording start timestamps, participant titles, editable person names, stop sample playback after speaker approval, Command+Control+R, and conservative multi-segment echo suppression.
 

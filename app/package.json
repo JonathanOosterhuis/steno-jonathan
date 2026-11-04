@@ -178,6 +178,10 @@
         {
           "from": "../bin-custom/steno-calendar",
           "to": "steno-calendar"
+        },
+        {
+          "from": "../bin-custom/steno-teams-share",
+          "to": "steno-teams-share"
         }
       ],
       "extendInfo": {

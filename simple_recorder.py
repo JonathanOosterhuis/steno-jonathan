@@ -989,6 +989,7 @@ Summary output language: {config.get_language_name(output_language)}
         try:
             for chunk in self.summarizer.summarize_transcript_streaming(
                 text_for_summary, duration_minutes, output_language, notes_text,
+                snapshot_stem=audio_path.stem,
                 progress_callback=_emit_progress,
                 meeting_context=meeting_context,
             ):
@@ -1116,6 +1117,7 @@ def generate_default_template_report(summary_path, transcript, notes, language,
             chunks = []
             for chunk in summarizer.summarize_transcript_streaming(
                 transcript, duration_minutes, report_language, notes,
+                snapshot_stem=Path(summary_path).name.removesuffix("_summary.md").removesuffix("_summary.json"),
                 template_prompt=tmpl["prompt"],
                 meeting_context=_meeting_context_for_note(summary_path),
             ):
@@ -1618,6 +1620,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
                 text_for_summary, duration_minutes, output_language, notes_text,
+                snapshot_stem=Path(audio_file).stem,
                 progress_callback=_emit_progress,
                 meeting_context=meeting_context,
             ):
@@ -3286,6 +3289,29 @@ def _has_transfer_audio(summary_file, stem, receipt):
     return False
 
 
+def _suggested_title_names(summary_file):
+    """Optional, read-only identity hints; never prevent a note from opening."""
+    try:
+        from src.config import get_config
+        from src.speaker_suggestions import read_speakers_sidecar, suggested_title_names
+        config = get_config()
+        if not config.get_identity_matching_enabled():
+            return []
+        summary_file = Path(summary_file)
+        stem = summary_file.stem.removesuffix('_summary')
+        sidecar = read_speakers_sidecar(summary_file.parent, stem)
+        return suggested_title_names(stem, sidecar, config.get_person_profiles()) if sidecar else []
+    except Exception:
+        return []
+
+
+@cli.command(name='speaker-title-names')
+@click.argument('summary_file', type=click.Path(exists=True, dir_okay=False))
+def speaker_title_names(summary_file):
+    """Return suggested names for display only, without confirming identities."""
+    print(json.dumps(_suggested_title_names(summary_file)))
+
+
 @cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
@@ -3412,6 +3438,7 @@ def list_meetings():
             essential_meeting['has_audio'] = stem in audio_stems or _has_transfer_audio(
                 summary_file, stem, transfer_receipt
             )
+            essential_meeting['suggested_participants'] = _suggested_title_names(summary_file)
             meetings.append((sort_key, essential_meeting))
         except Exception as e:
             logger.warning(f"Failed to load {summary_file}: {e}")
@@ -3603,6 +3630,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
                 transcript, duration_minutes, output_language, notes_text,
+                snapshot_stem=summary_path.name.removesuffix("_summary.md").removesuffix("_summary.json"),
                 progress_callback=_emit_progress,
                 meeting_context=meeting_context,
             ):
@@ -4064,6 +4092,7 @@ def generate_report(summary_file, template_id):
     try:
         for chunk in recorder.summarizer.summarize_transcript_streaming(
             transcript, duration_minutes, output_language, notes_text,
+            snapshot_stem=summary_path.name.removesuffix("_summary.md").removesuffix("_summary.json"),
             progress_callback=_emit_progress,
             template_prompt=tmpl["prompt"],
             meeting_context=_meeting_context_for_note(summary_path),

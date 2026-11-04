@@ -108,6 +108,15 @@ const stenoai = {
     requestMicrophone: () => invoke('request-microphone-permission'),
   },
 
+  screenSnapshots: {
+    meeting: (summaryFile) => invoke('meeting-snapshots-list', summaryFile),
+    view: (summaryFile, file) => invoke('meeting-snapshots-view', summaryFile, file),
+    save: (summaryFile, file) => invoke('meeting-snapshots-save', summaryFile, file),
+    status: () => invoke('screen-snapshots-status'),
+    automatic: (enabled) => invoke('screen-snapshots-automatic', enabled),
+    list: () => invoke('screen-snapshots-list'),
+    select: (id) => invoke('screen-snapshots-select', id),
+  },
   recording: {
     recoverable: () => invoke('list-recoverable-recordings'),
     recover: (id) => invoke('recover-recording', id),
