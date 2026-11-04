@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import * as React from 'react';
 import { Loader2, Play, Square, Trash2, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -135,7 +136,7 @@ export function PeopleTab() {
               <Button
                 variant="outline"
                 className={COMPACT_BTN}
-                aria-label={`Rename ${profile.display_name}`}
+                aria-label={t('people.rename.label', { name: profile.display_name })}
                 onClick={() => {
                   playback.stop();
                   setRenameTarget(profile);
@@ -144,7 +145,7 @@ export function PeopleTab() {
                 }}
               >
                 <Pencil className="size-[13px]" />
-                Rename
+                {t('people.rename.action')}
               </Button>
               {profile.sample_available && (
                 <Button
@@ -208,18 +209,18 @@ export function PeopleTab() {
                 });
                 setRenameTarget(null);
               } catch {
-                setRenameError('Could not rename this person. Use a unique name and try again.');
+                setRenameError(t('people.rename.error'));
               }
             }}
           >
             <DialogHeader>
-              <DialogTitle>Rename person</DialogTitle>
+              <DialogTitle>{t('people.rename.title')}</DialogTitle>
               <DialogDescription>
-                Use a full name to distinguish people. Their voice samples are kept.
+                {t('people.rename.description')}
               </DialogDescription>
             </DialogHeader>
             <label className="mt-4 block text-sm" htmlFor="person-display-name">
-              Full name
+              {t('people.rename.fullName')}
             </label>
             <Input
               id="person-display-name"
@@ -241,10 +242,10 @@ export function PeopleTab() {
                 disabled={renameProfile.isPending}
                 onClick={() => setRenameTarget(null)}
               >
-                Cancel
+                {t('people.rename.cancel')}
               </Button>
               <Button type="submit" disabled={!renameName.trim() || renameProfile.isPending}>
-                {renameProfile.isPending ? 'Saving…' : 'Save'}
+                {renameProfile.isPending ? t('people.rename.saving') : t('people.rename.save')}
               </Button>
             </DialogFooter>
           </form>

@@ -1,3 +1,4 @@
+import { ScreenSnapshotsControl } from '@/components/ScreenSnapshotsControl';
 import { t } from '@/i18n';
 import * as React from 'react';
 import {
@@ -117,6 +118,7 @@ export function Recording() {
                 />
               </div>
             </header>
+            <ScreenSnapshotsControl />
 
             <CaptureCheckPanel />
 

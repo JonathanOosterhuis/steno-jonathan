@@ -1114,6 +1114,11 @@ export interface StenoaiBridge {
     requestMicrophone: RequestFn<[], MicPermissionGrantResponse>;
   };
 
+  screenSnapshots: {
+    status: RequestFn<[], Result<{ selected: string | null; count: number; active: boolean; error: string | null }>>;
+    list: RequestFn<[], Result<{ sources: { id: string; name: string; preview: string }[] }>>;
+    select: RequestFn<[id: string | null], Result<{ selected: string | null; count: number; active: boolean; error: string | null }>>;
+  };
   recording: {
     recoverable: RequestFn<[], Result<{ recordings: { id: string; name: string; updatedAt: string; bytes: number }[] }>>;
     recover: RequestFn<[id: string], Result<Record<string, never>>>;

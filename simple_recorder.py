@@ -989,6 +989,7 @@ Summary output language: {config.get_language_name(output_language)}
         try:
             for chunk in self.summarizer.summarize_transcript_streaming(
                 text_for_summary, duration_minutes, output_language, notes_text,
+                snapshot_stem=audio_path.stem,
                 progress_callback=_emit_progress,
                 meeting_context=meeting_context,
             ):
@@ -1116,6 +1117,7 @@ def generate_default_template_report(summary_path, transcript, notes, language,
             chunks = []
             for chunk in summarizer.summarize_transcript_streaming(
                 transcript, duration_minutes, report_language, notes,
+                snapshot_stem=Path(summary_path).name.removesuffix("_summary.md").removesuffix("_summary.json"),
                 template_prompt=tmpl["prompt"],
                 meeting_context=_meeting_context_for_note(summary_path),
             ):
@@ -1618,6 +1620,7 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
                 text_for_summary, duration_minutes, output_language, notes_text,
+                snapshot_stem=Path(audio_file).stem,
                 progress_callback=_emit_progress,
                 meeting_context=meeting_context,
             ):
@@ -3603,6 +3606,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
         try:
             for chunk in recorder.summarizer.summarize_transcript_streaming(
                 transcript, duration_minutes, output_language, notes_text,
+                snapshot_stem=summary_path.name.removesuffix("_summary.md").removesuffix("_summary.json"),
                 progress_callback=_emit_progress,
                 meeting_context=meeting_context,
             ):
@@ -4064,6 +4068,7 @@ def generate_report(summary_file, template_id):
     try:
         for chunk in recorder.summarizer.summarize_transcript_streaming(
             transcript, duration_minutes, output_language, notes_text,
+            snapshot_stem=summary_path.name.removesuffix("_summary.md").removesuffix("_summary.json"),
             progress_callback=_emit_progress,
             template_prompt=tmpl["prompt"],
             meeting_context=_meeting_context_for_note(summary_path),

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Tray, Menu, nativeImage, powerMonitor, net, session } = require('electron');
+const { desktopCapturer, app, BrowserWindow, ipcMain, dialog, shell, systemPreferences, globalShortcut, Tray, Menu, nativeImage, powerMonitor, net, session } = require('electron');
 
 // safeStorage is accessed lazily via getSafeStorage(), NOT destructured from the
 // require above. On macOS, merely retrieving the safeStorage binding at load
@@ -1579,6 +1579,8 @@ function commitPendingDelete(id) {
     );
     return;
   }
+  try { screenSnapshots.remove(path.basename(entry.originalSummaryPath).replace(/_summary\.(md|json)$/, '')); }
+  catch (_) { console.warn('Could not remove screen snapshots for deleted note.'); }
   // The note is now permanently gone — mirror the deletion into the Obsidian
   // vault (#413) if sync is on. Runs at the single commit choke point so the
   // timer, explicit-dismiss and quit paths all mirror; preserves an
@@ -5612,6 +5614,21 @@ let recordingRuntimeState = {
   pausedTotalMs: 0,
   isPaused: false
 };
+const screenSnapshots = require('./screen-snapshots').createScreenSnapshots({
+  getUserDataDir,
+  getSources: (options) => desktopCapturer.getSources(options),
+  getRecordingState: () => recordingRuntimeState,
+  getElapsedSeconds: getRecordingElapsedSeconds,
+});
+ipcMain.handle('screen-snapshots-status', () => ({ success: true, ...screenSnapshots.status() }));
+ipcMain.handle('screen-snapshots-list', async () => {
+  try { return { success: true, sources: await screenSnapshots.list() }; }
+  catch (_) { return { success: false, error: 'Cannot list windows. Allow Screen Recording in System Settings and try again.' }; }
+});
+ipcMain.handle('screen-snapshots-select', async (_event, id) => {
+  try { return { success: true, ...await screenSnapshots.select(id) }; }
+  catch (error) { return { success: false, error: error.message }; }
+});
 let ollamaProcess = null;  // Track spawned Ollama process for cleanup on quit
 let ollamaPid = null;      // Store PID separately since unref() disconnects the process
 
@@ -5656,6 +5673,7 @@ function checkForOrphanedRecording() {
 }
 
 function resetRecordingRuntimeState() {
+  screenSnapshots.stop();
   recordingRuntimeState = {
     startedAtMs: null,
     pausedAtMs: null,
@@ -5687,6 +5705,7 @@ function markRecordingPaused() {
   if (!recordingRuntimeState.startedAtMs || recordingRuntimeState.isPaused) {
     return;
   }
+  screenSnapshots.invalidate();
   recordingRuntimeState.isPaused = true;
   recordingRuntimeState.pausedAtMs = Date.now();
 }
@@ -6788,6 +6807,7 @@ ipcMain.handle('resume-recording-ui', async () => {
 });
 
 ipcMain.handle('stop-recording-ui', async () => {
+  screenSnapshots.stop();
   // The call this recording was paired with no longer matters once it stops.
   clearAutoStartedSession();
   // Processing loads the models itself; a running warm-up is awaited there.
@@ -10185,6 +10205,7 @@ ipcMain.handle('get-recordings-dir', async () => {
 let activeSysAudioWriteStream = null;
 let activeSysAudioFilePath = null;
 let activeSysAudioBytesWritten = 0;
+let activeSysAudioSnapshots = null;
 // Deterministic summary-file path for the current recording, derived from the
 // audio filename at open. Kept separate from activeSysAudioFilePath (which the
 // renderer's close nulls) so stop-recording-ui can still write the instant-stop
@@ -10220,6 +10241,11 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
       sendDebugLog(`[sysaudio] write stream error: ${err.message}`);
       try { recordingJournal.update(filePath, 'failed'); } catch (_) {}
       if (activeSysAudioWriteStream === stream) {
+        screenSnapshots.stop();
+        if (activeSysAudioBytesWritten === 0) {
+          try { screenSnapshots.discard(activeSysAudioSnapshots); } catch (_) { /* best effort */ }
+        }
+        activeSysAudioSnapshots = null;
         activeSysAudioWriteStream = null;
         activeSysAudioFilePath = null;
         activeSysAudioBytesWritten = 0;
@@ -10227,6 +10253,7 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
     });
     activeSysAudioWriteStream = stream;
     activeSysAudioFilePath = filePath;
+    activeSysAudioSnapshots = screenSnapshots.start(filePath, currentRecordingAppendTarget);
     activeSysAudioSummaryFile = summaryFileForAudio(filePath);
     activeSysAudioBytesWritten = 0;
     sendDebugLog('[sysaudio] opened recording for incremental write');
@@ -10269,9 +10296,12 @@ ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
 });
 
 ipcMain.handle('close-system-audio-file', async () => {
+  screenSnapshots.stop();
   const stream = activeSysAudioWriteStream;
   const filePath = activeSysAudioFilePath;
   const bytesWritten = activeSysAudioBytesWritten;
+  const snapshotSession = activeSysAudioSnapshots;
+  activeSysAudioSnapshots = null;
   activeSysAudioWriteStream = null;
   activeSysAudioFilePath = null;
   activeSysAudioBytesWritten = 0;
@@ -10287,6 +10317,7 @@ ipcMain.handle('close-system-audio-file', async () => {
     // failed start that still opened the file). Remove it rather than queue an
     // empty recording or leave a stray .webm, and report no usable file.
     if (bytesWritten === 0) {
+      try { screenSnapshots.discard(snapshotSession); } catch (_) { /* best effort */ }
       try { fs.unlinkSync(filePath); } catch (_) { /* */ }
       recordingJournal.forget(recordingJournal.idFor(filePath));
       sendDebugLog('[sysaudio] closed empty recording and removed file');

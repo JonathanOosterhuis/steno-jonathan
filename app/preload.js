@@ -108,6 +108,11 @@ const stenoai = {
     requestMicrophone: () => invoke('request-microphone-permission'),
   },
 
+  screenSnapshots: {
+    status: () => invoke('screen-snapshots-status'),
+    list: () => invoke('screen-snapshots-list'),
+    select: (id) => invoke('screen-snapshots-select', id),
+  },
   recording: {
     recoverable: () => invoke('list-recoverable-recordings'),
     recover: (id) => invoke('recover-recording', id),

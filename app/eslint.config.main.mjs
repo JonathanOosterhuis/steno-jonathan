@@ -4,7 +4,7 @@ import globals from 'globals';
 export default [
   js.configs.recommended,
   {
-    files: ['main.js'],
+    files: ['main.js', 'screen-snapshots.js', 'screen-snapshots.test.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',
