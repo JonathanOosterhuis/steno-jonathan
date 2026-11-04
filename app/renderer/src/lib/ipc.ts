@@ -67,6 +67,8 @@ export interface Meeting {
   session_info: SessionInfo;
   summary: string;
   participants?: unknown[];
+  /** Read-only identity suggestions for display titles; not confirmed attendance. */
+  suggested_participants?: string[];
   discussion_areas?: unknown[];
   key_points?: string[];
   action_items?: unknown[];

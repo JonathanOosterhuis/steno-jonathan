@@ -18,6 +18,8 @@ Snapshots and cached descriptions live under the app user-data directory in `scr
 
 ## Current state
 
+Automatic meeting titles include both confirmed and suggested speaker names, excluding your own name. Suggestions remain unconfirmed and do not alter voice profiles or transcript labels. Manually edited titles are preserved.
+
 The local customizations are committed here: microphone recovery, recording start timestamps, participant titles, editable person names, stop sample playback after speaker approval, Command+Control+R, and conservative multi-segment echo suppression.
 
 The application is currently still branded StenoAI. Independent app identity, data migration, and a clean end-to-end build from this checkout are pending. Existing build tooling is documented in [custom/README.md](custom/README.md); it currently targets the existing StenoAI installation. Do not run its install script expecting a separately named app.

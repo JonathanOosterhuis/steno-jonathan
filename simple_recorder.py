@@ -3289,6 +3289,29 @@ def _has_transfer_audio(summary_file, stem, receipt):
     return False
 
 
+def _suggested_title_names(summary_file):
+    """Optional, read-only identity hints; never prevent a note from opening."""
+    try:
+        from src.config import get_config
+        from src.speaker_suggestions import read_speakers_sidecar, suggested_title_names
+        config = get_config()
+        if not config.get_identity_matching_enabled():
+            return []
+        summary_file = Path(summary_file)
+        stem = summary_file.stem.removesuffix('_summary')
+        sidecar = read_speakers_sidecar(summary_file.parent, stem)
+        return suggested_title_names(stem, sidecar, config.get_person_profiles()) if sidecar else []
+    except Exception:
+        return []
+
+
+@cli.command(name='speaker-title-names')
+@click.argument('summary_file', type=click.Path(exists=True, dir_okay=False))
+def speaker_title_names(summary_file):
+    """Return suggested names for display only, without confirming identities."""
+    print(json.dumps(_suggested_title_names(summary_file)))
+
+
 @cli.command()
 def list_meetings():
     """List all processed meetings - optimized for fast loading"""
@@ -3415,6 +3438,7 @@ def list_meetings():
             essential_meeting['has_audio'] = stem in audio_stems or _has_transfer_audio(
                 summary_file, stem, transfer_receipt
             )
+            essential_meeting['suggested_participants'] = _suggested_title_names(summary_file)
             meetings.append((sort_key, essential_meeting))
         except Exception as e:
             logger.warning(f"Failed to load {summary_file}: {e}")

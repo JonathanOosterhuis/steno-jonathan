@@ -19,3 +19,9 @@ test('renamed participants are immediately reflected without editing the base', 
 test('does not add a prefix before owner identity is available', () => {
   expect(withParticipantTitle(meeting(['Jonathan', 'Panos'])).session_info.name).toBe('Project planning');
 });
+test('includes suggested names without changing confirmed participants or the saved title', () => {
+  const note = { ...meeting(['Jonathan', 'Arash']), suggested_participants: ['Panos', 'Arash', 'Jonathan'] };
+  expect(withParticipantTitle(note, 'Jonathan').session_info.name).toBe('Arash, Panos · Project planning');
+  expect(note.participants).toEqual(['Jonathan', 'Arash']);
+  expect(note.session_info.name).toBe('Project planning');
+});

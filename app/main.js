@@ -3131,6 +3131,13 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
         hasSpeakerSidecar = false;
       }
     }
+    let suggestedParticipants = [];
+    if (hasSpeakerSidecar) {
+      try {
+        const hints = JSON.parse(await runPythonScript('simple_recorder.py', ['speaker-title-names', realResolved], true));
+        if (Array.isArray(hints)) suggestedParticipants = hints.filter(name => typeof name === 'string');
+      } catch (_) { /* Optional title hints must not prevent opening a note. */ }
+    }
     if (summaryFile.endsWith('.md')) {
       // Legacy .md meetings are still listed by list-meetings, so their detail
       // pages route through here. Unlike the list payload, the detail page
@@ -3138,11 +3145,11 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
       // TranscriptPanel), so we return everything parseMeetingMarkdown yields.
       const mdMeeting = parseMeetingMarkdown(content, realResolved);
       const mdSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
-      return { success: true, meeting: { ...mdMeeting, has_speaker_sidecar: hasSpeakerSidecar, reports: mdSidecar.reports, active_report: mdSidecar.active_report } };
+      return { success: true, meeting: { ...mdMeeting, suggested_participants: suggestedParticipants, has_speaker_sidecar: hasSpeakerSidecar, reports: mdSidecar.reports, active_report: mdSidecar.active_report } };
     }
     const jsonMeeting = JSON.parse(content);
     const jsonSidecar = await readReportsSidecar(realResolved, allowedOutputDirs);
-    return { success: true, meeting: { ...jsonMeeting, has_speaker_sidecar: hasSpeakerSidecar, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report } };
+    return { success: true, meeting: { ...jsonMeeting, suggested_participants: suggestedParticipants, has_speaker_sidecar: hasSpeakerSidecar, reports: jsonSidecar.reports, active_report: jsonSidecar.active_report } };
   } catch (error) {
     return { success: false, error: error.message };
   }
