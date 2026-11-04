@@ -109,6 +109,9 @@ const stenoai = {
   },
 
   screenSnapshots: {
+    meeting: (summaryFile) => invoke('meeting-snapshots-list', summaryFile),
+    view: (summaryFile, file) => invoke('meeting-snapshots-view', summaryFile, file),
+    save: (summaryFile, file) => invoke('meeting-snapshots-save', summaryFile, file),
     status: () => invoke('screen-snapshots-status'),
     automatic: (enabled) => invoke('screen-snapshots-automatic', enabled),
     list: () => invoke('screen-snapshots-list'),

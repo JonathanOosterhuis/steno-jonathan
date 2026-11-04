@@ -1,0 +1,60 @@
+import { test, expect } from '../fixtures/electron';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'fs';
+import path from 'path';
+
+test('recording snapshots preview and export originals singly or together', async ({ launchApp, userDataDir }, testInfo) => {
+  const output = path.join(userDataDir, 'output');
+  const snapshots = path.join(userDataDir, 'screen-snapshots', 'gallery');
+  mkdirSync(output, { recursive: true }); mkdirSync(snapshots, { recursive: true });
+  const note = path.join(output, 'gallery_summary.md');
+  writeFileSync(note, '---\ntitle: "Snapshot gallery test"\ndate: "2026-11-04T10:00:00"\nnotes_generated: true\n---\n\n## Summary\nSynthetic presentation test.\n\n## Transcript\nA synthetic test recording.\n');
+  const { app, page } = await launchApp({ releaseHighlightsSeen: true });
+  const images = await page.evaluate(() => [1, 2].map(number => {
+    const canvas = document.createElement('canvas'); canvas.width = 1000; canvas.height = 600;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#faf9f5'; ctx.fillRect(0, 0, 1000, 600);
+    ctx.fillStyle = '#1b1b19'; ctx.font = 'bold 55px sans-serif'; ctx.fillText(`PROJECT ORION - ${number}`, 65, 150);
+    ctx.font = '32px sans-serif'; ctx.fillText(number === 1 ? 'Launch: 12 December 2026' : 'Budget: EUR 25,000', 65, 270);
+    ctx.fillText('Synthetic test slide', 65, 470);
+    return canvas.toDataURL('image/jpeg').split(',')[1];
+  }));
+  images.forEach((image, i) => writeFileSync(path.join(snapshots, `000${i}.jpg`), Buffer.from(image, 'base64')));
+  writeFileSync(path.join(snapshots, 'manifest.json'), JSON.stringify({ version: 1, frames: [{ file: '0000.jpg', seconds: 12 }, { file: '0001.jpg', seconds: 75 }] }));
+  await page.getByText('Snapshot gallery test', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Open snapshot at 00:00:12', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open snapshot at 00:01:15', exact: true })).toBeVisible();
+  await page.evaluate(() => { document.documentElement.classList.add('dark'); document.documentElement.dataset.theme = 'dark'; });
+  await page.getByRole('region', { name: 'Snapshots', exact: true }).screenshot({ path: testInfo.outputPath('gallery-dark.png') });
+  await page.getByRole('button', { name: 'Open snapshot at 00:00:12', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('img')).toHaveAttribute('src', 'data:image/jpeg;base64,' + images[0]);
+  await page.screenshot({ path: testInfo.outputPath('preview.png') });
+  const target = path.join(userDataDir, 'exported.jpg');
+  await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }); }, target);
+  await page.getByRole('dialog').getByRole('button', { name: 'Download image', exact: true }).click();
+  await expect.poll(() => existsSync(target)).toBe(true);
+  expect(readFileSync(target)).toEqual(Buffer.from(images[0], 'base64'));
+  await page.keyboard.press('Escape');
+  await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, userDataDir);
+  await page.getByRole('button', { name: 'Download all', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Saved 2 image(s).' })).toBeVisible();
+  const folder = readdirSync(userDataDir).find(name => name.startsWith('Steno-snapshots-'))!;
+  expect(readdirSync(path.join(userDataDir, folder))).toEqual(['00-00-12-0000.jpg', '00-01-15-0001.jpg']);
+  expect(readFileSync(path.join(userDataDir, folder, '00-01-15-0001.jpg'))).toEqual(Buffer.from(images[1], 'base64'));
+  await app.evaluate(({ dialog }) => { dialog.showSaveDialog = async () => ({ canceled: true, filePath: '' }); });
+  const canceled = await page.evaluate(file => window.stenoai.screenSnapshots.save(file, '0000.jpg'), note);
+  expect(canceled).toMatchObject({ success: true, canceled: true });
+  expect(await page.evaluate(file => window.stenoai.screenSnapshots.view(file, '../config.json'), note)).toMatchObject({ success: false });
+  const outside = path.join(userDataDir, 'outside_summary.md'); writeFileSync(outside, 'private');
+  expect(await page.evaluate(file => window.stenoai.screenSnapshots.meeting(file), outside)).toMatchObject({ success: false });
+  await page.evaluate(() => { document.documentElement.classList.remove('dark'); document.documentElement.dataset.theme = 'light'; });
+  await page.getByRole('region', { name: 'Snapshots', exact: true }).screenshot({ path: testInfo.outputPath('gallery-light.png') });
+});
+
+test('a recording without images has an explicit empty state', async ({ launchApp, userDataDir }) => {
+  mkdirSync(path.join(userDataDir, 'output'), { recursive: true });
+  writeFileSync(path.join(userDataDir, 'output', 'empty_summary.md'), '---\ntitle: "No snapshots test"\ndate: "2026-11-04T10:00:00"\n---\n\n## Transcript\nTest.\n');
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
+  await page.getByText('No snapshots test', { exact: true }).click();
+  await expect(page.getByText('No snapshots saved for this recording.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download all', exact: true })).toHaveCount(0);
+});

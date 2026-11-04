@@ -5624,6 +5624,21 @@ const screenSnapshots = require('./screen-snapshots').createScreenSnapshots({
     helperPath: app.isPackaged ? path.join(process.resourcesPath, 'steno-teams-share') : path.join(__dirname, '../bin-custom/steno-teams-share'),
   }) : null,
 });
+const snapshotLibrary = require('./snapshot-library').createSnapshotLibrary({
+  getUserDataDir, nativeImage, dialog, getWindow: () => mainWindow,
+});
+for (const operation of ['list', 'view', 'save']) {
+  ipcMain.handle(`meeting-snapshots-${operation}`, async (_event, summaryFile, file) => {
+    try {
+      const validated = await validateMeetingFilePath(summaryFile);
+      if (validated.error) return { success: false, error: validated.error };
+      const stem = path.basename(validated.realPath).replace(/_summary\.(md|json)$/, '');
+      if (operation === 'list') return { success: true, frames: await snapshotLibrary.list(stem) };
+      if (operation === 'view') return { success: true, image: snapshotLibrary.view(stem, file) };
+      return { success: true, ...await snapshotLibrary.save(stem, file ?? null) };
+    } catch (_) { return { success: false, error: 'Could not read or save snapshots. Check that the images and destination are available.' }; }
+  });
+}
 ipcMain.handle('screen-snapshots-status', () => ({ success: true, ...screenSnapshots.status() }));
 ipcMain.handle('screen-snapshots-automatic', (_event, enabled) => {
   try { return { success: true, ...screenSnapshots.setAutomatic(enabled) }; }

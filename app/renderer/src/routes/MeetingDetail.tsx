@@ -29,6 +29,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { MeetingsShell } from '@/components/MeetingsShell';
 import { SpeakerReviewPanel } from '@/components/SpeakerReviewPanel';
+import { MeetingSnapshots } from '@/components/MeetingSnapshots';
 import { MeetingCalendarSection } from '@/components/MeetingCalendarSection';
 import { MeetingLanguageSelect } from '@/components/MeetingLanguageSelect';
 import { VaultSyncStatusLine } from '@/components/VaultSyncStatusLine';
@@ -1398,6 +1399,8 @@ function DetailContent({
           )}
         </>
       )}
+
+      <MeetingSnapshots key={routeSummaryFile} summaryFile={routeSummaryFile} />
 
       {tab === 'notes' && (
         <MyNotesEditor summaryFile={routeSummaryFile} initialNotes={meeting.user_notes ?? ''} />

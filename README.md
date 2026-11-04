@@ -12,6 +12,8 @@ During recording the app checks every 10 seconds, skips near-identical images, p
 
 When generating notes or a report, up to 16 images sampled across the timeline are read by the local Ollama vision model `gemma3:4b`. Install this model in Ollama if it is missing. Images remain local. Their bounded, timestamped text descriptions are sent to your configured notes provider, including a cloud provider if selected. Visual evidence is labeled separately from spoken decisions and authored notes. A vision failure preserves ordinary transcript-based notes and adds a retry warning.
 
+Each recording has a **Snapshots** gallery with recording timestamps. Open a thumbnail for the full image, choose **Download image** to save one original JPG, or **Download all** to save all originals in a newly created folder at your chosen location. Canceling an export leaves the originals untouched.
+
 Snapshots and cached descriptions live under the app user-data directory in `screen-snapshots/<meeting-stem>/`. Deleting a meeting after its undo window also removes these files. Tests use isolated directories and synthetic images.
 
 ## Current state

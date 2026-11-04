@@ -153,5 +153,19 @@
   "snapshots.waiting": "Enabled. Waiting for shared content during recording.",
   "snapshots.access": "Allow StenoAI in System Settings > Privacy & Security > Accessibility to detect shared content.",
   "snapshots.ambiguous": "Multiple shared screens found. Snapshots are paused until one remains.",
-  "snapshots.teamsHelp": "Automatically saves the shared-content area in the Teams desktop app during recording. Requires Accessibility and Screen Recording access. Keep the meeting window visible. English Teams interface supported."
+  "snapshots.teamsHelp": "Automatically saves the shared-content area in the Teams desktop app during recording. Requires Accessibility and Screen Recording access. Keep the meeting window visible. English Teams interface supported.",
+  "snapshots.gallery": "Snapshots",
+  "snapshots.downloadAll": "Download all",
+  "snapshots.download": "Download image",
+  "snapshots.loadingGallery": "Loading snapshots…",
+  "snapshots.galleryFailed": "Could not load the snapshots for this recording.",
+  "snapshots.noImages": "No snapshots saved for this recording.",
+  "snapshots.exportHelp": "Open a preview to enlarge it. Download all saves the original JPG images in a new folder at your chosen location. Times are measured from the start of the recording.",
+  "snapshots.openAt": "Open snapshot at {{time}}",
+  "snapshots.imageAt": "Snapshot at {{time}}",
+  "snapshots.downloadAt": "Download snapshot at {{time}}",
+  "snapshots.unavailable": "This snapshot is missing or cannot be read.",
+  "snapshots.saved": "Saved {{count}} image(s).",
+  "snapshots.saveFailed": "Could not save snapshots. Check that the images and destination are available, then try again.",
+  "snapshots.previewHelp": "Original snapshot from this recording."
 }

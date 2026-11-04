@@ -1115,6 +1115,9 @@ export interface StenoaiBridge {
   };
 
   screenSnapshots: {
+    meeting: RequestFn<[summaryFile: string], Result<{ frames: { file: string; seconds: number; preview: string | null; available: boolean }[] }>>;
+    view: RequestFn<[summaryFile: string, file: string], Result<{ image: string }>>;
+    save: RequestFn<[summaryFile: string, file?: string], Result<{ canceled: boolean; count?: number }>>;
     automatic: RequestFn<[enabled: boolean], Result<Record<string, unknown>>>;
     status: RequestFn<
       [],
