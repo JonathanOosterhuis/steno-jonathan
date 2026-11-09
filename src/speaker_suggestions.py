@@ -1509,9 +1509,6 @@ def restore_transcript_text_labels(
                 continue
             if (entry.get("channel"), entry.get("diarization_speaker_id")) not in target_ids:
                 continue
-            current_label = _TRANSCRIPT_LINE_RE.match(lines[indices[index]]).group(2)
-            if replacement_label is not None and current_label == "You":
-                continue
             start = entry.get("start")
             if not isinstance(start, (int, float)) or not math.isfinite(start):
                 logger.warning(
@@ -1538,8 +1535,6 @@ def restore_transcript_text_labels(
         if (entry.get("channel"), entry.get("diarization_speaker_id")) not in target_ids:
             continue
         timestamp_str, label, text = _TRANSCRIPT_LINE_RE.match(lines[line_idx]).groups()
-        if replacement_label is not None and label == "You":
-            continue
         if replacement_label is not None:
             restored = replacement_label
         else:
@@ -1714,9 +1709,8 @@ def relabel_transcript_exact(transcript_path: Path, turn_manifest: list, target_
     exact same order, at the exact same time -- there is nothing to
     "match" at all, only to look up.
 
-    Never touches "You" (self-match stays out of scope, same as the other
-    two relabel functions) -- but "You" lines still consume a manifest
-    position, since they're still a real turn in the same `turns` list.
+    A verified cluster assignment can replace "You": on a shared
+    microphone that label is a channel default, not a confirmed identity.
 
     Meetings recorded before this manifest existed simply have no
     `turn_manifest` at all -- callers should fall back to
@@ -1777,8 +1771,6 @@ def relabel_transcript_exact(transcript_path: Path, turn_manifest: list, target_
     for line_idx, entry in zip(diarised_line_indices, turn_manifest):
         match = _TRANSCRIPT_LINE_RE.match(lines[line_idx])
         timestamp_str, label, text = match.groups()
-        if label == "You":
-            continue
         key = (entry.get("channel"), entry.get("diarization_speaker_id"))
         if key in target_ids and label != display_name:
             lines[line_idx] = f"[{timestamp_str}] [{display_name}] {text}"
@@ -2358,11 +2350,17 @@ def sample_text_from_samples(samples: list) -> Optional[str]:
     apart, and the visible symptom is a collapsed row quoting a moment that
     expanding never offers.
     """
-    longest = max(
-        (s for s in samples if s["text"]),
-        key=lambda s: s["end"] - s["start"], default=None,
+    sample = representative_sample(samples)
+    return sample["text"] if sample else None
+
+
+def representative_sample(samples: list) -> Optional[dict]:
+    """Select the playable excerpt used by both the quote and its play button."""
+    return max(
+        (sample for sample in samples if sample["text"] and sample["end"] > sample["start"]),
+        key=lambda sample: sample["end"] - sample["start"],
+        default=None,
     )
-    return longest["text"] if longest else None
 
 
 # Small buffer around the longest segment's exact boundaries so a clip

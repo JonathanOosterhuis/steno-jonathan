@@ -267,7 +267,7 @@ interface PlaySampleButtonProps {
   label?: string;
 }
 
-/** Play/stop toggle for a cluster's longest-segment audio sample -- mirrors
+/** Play/stop toggle for a cluster's quoted or explicitly selected sample -- mirrors
  * pasrom/meeting-transcriber's SpeakerNamingView.swift play button exactly
  * (fetch-on-click, toggle icon, auto-reset when playback ends). Fetched via
  * a mutation (not cached) since nothing needs to stay fresh in the

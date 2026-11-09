@@ -23,6 +23,7 @@ from src.speaker_suggestions import (
     confirmed_participant_names,
     determine_recording_type,
     extract_sample_text,
+    sample_text_from_samples,
     extract_segment_samples,
     extract_speaker_sample_audio,
     longest_segment,
@@ -1036,13 +1037,13 @@ class RelabelTranscriptExactTests(unittest.TestCase):
             self.assertEqual(changed, 0)
             self.assertIn("[00:05] [Speaker 2] hello there", path.read_text())
 
-    def test_never_relabels_you(self):
+    def test_confirmed_cluster_replaces_you_channel_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:05] [You] hello there")
             manifest = [{"start": 5.2, "channel": "mic", "diarization_speaker_id": "SPEAKER_1"}]
             changed = relabel_transcript_exact(path, manifest, {("mic", "SPEAKER_1")}, "Person Alpha")
-            self.assertEqual(changed, 0)
-            self.assertIn("[00:05] [You] hello there", path.read_text())
+            self.assertEqual(changed, 1)
+            self.assertIn("[00:05] [Person Alpha] hello there", path.read_text())
 
     def test_matches_across_fragment_ids_via_target_ids_set(self):
         # Mirrors merge_same_channel_fragments' resolved_id + merged_from
@@ -1303,24 +1304,17 @@ class ExtractSampleTextTests(unittest.TestCase):
             path = Path(tmp) / "nonexistent.txt"
             self.assertIsNone(extract_sample_text(path, [{"start": 4.0, "end": 6.0}]))
 
-    def test_the_manifest_wins_when_the_segments_disagree_with_it(self):
-        # The manifest records which cluster produced each line at the
-        # moment the line was written; the segments are the same run's
-        # acoustics. When they disagree -- here the only segment sits at
-        # 4-6s while the owned line is at 50s -- the manifest is the more
-        # precise record, so the quote stands and the clip falls back to a
-        # window at the line's own timestamp. Withholding the text instead
-        # would drop a line this cluster demonstrably spoke.
+    def test_unplayable_quote_stays_in_expanded_excerpts_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_transcript(tmp, "[00:50] [Speaker 2] hello there")
-            self.assertEqual(
-                extract_sample_text(
-                    path, [{"start": 4.0, "end": 6.0}],
-                    turn_manifest=self._manifest((50.0, "system", "SPEAKER_0")),
-                    target_ids={("system", "SPEAKER_0")},
-                ),
-                "hello there",
+            samples = extract_segment_samples(
+                path, [{"start": 4.0, "end": 6.0}],
+                turn_manifest=self._manifest((50.0, "system", "SPEAKER_0")),
+                target_ids={("system", "SPEAKER_0")},
             )
+            self.assertEqual(samples[0]["text"], "hello there")
+            self.assertEqual(samples[0]["start"], samples[0]["end"])
+            self.assertIsNone(sample_text_from_samples(samples))
 
     def test_prebuilt_manifest_index_avoids_reparsing_per_cluster(self):
         with tempfile.TemporaryDirectory() as tmp:

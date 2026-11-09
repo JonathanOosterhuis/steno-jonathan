@@ -7,6 +7,7 @@ import {
   writeMeetingMarkdown,
   writeSpeakersSidecar,
   writeTranscriptFile,
+  writeUserConfig,
 } from '../fixtures/user-config';
 import { makeWav } from '../fixtures/make-wav';
 import { readFileSync, mkdirSync, writeFileSync } from 'fs';
@@ -78,6 +79,7 @@ type StenoWindow = Window & {
         channel: string,
         diarizationSpeakerId: string,
         expectedRunId: string,
+        segmentIndex?: number,
       ) => Promise<{ success: boolean; error?: string; audio_base64?: string }>;
       listProfiles: () => Promise<{
         success: boolean;
@@ -257,8 +259,9 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
   });
 
   enableSpeakerIdentification(userDataDir);
+  writeUserConfig(userDataDir, { user_name: 'Person Alpha', privacy_notice_seen: true });
 
-  const { page } = await launchApp();
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
 
   const result = await page.evaluate(
     (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
@@ -288,6 +291,11 @@ test('confirm-speaker --relabel-transcript persists a PersonProfile and relabels
   );
   expect(firstMeeting.success, firstMeeting.error).toBe(true);
   expect(firstMeeting.meeting!.diarised_text).toContain('[00:05] [Person Alpha] hello there');
+
+  await page.evaluate((file) => { window.location.hash = `#/meetings/${encodeURIComponent(file)}`; }, summaryFile);
+  await expect(page.getByTestId('meeting-detail-title')).toContainText('Speaker naming');
+  await page.getByRole('button', { name: 'Show transcript' }).click();
+  await expect(page.getByText('hello there', { exact: true }).locator('..')).toHaveClass(/items-end/);
 
   // A second confirm of the SAME cluster (the review UI's "Change"
   // correction) REASSIGNS it: the transcript re-labels idempotently rather
@@ -368,7 +376,7 @@ test('identification aids: sample_text/is_likely_artifact/recording_available an
   // -- proving the extraction, not just that it gracefully no-ops.
   const recordingsDir = path.join(userDataDir, 'recordings');
   mkdirSync(recordingsDir, { recursive: true });
-  makeWav(path.join(recordingsDir, `${stem}.wav`), { seconds: 3, channels: 2 });
+  makeWav(path.join(recordingsDir, `${stem}.wav`), { seconds: 8, channels: 2 });
 
   writeSpeakersSidecar(userDataDir, stem, {
     mic: {
@@ -377,8 +385,8 @@ test('identification aids: sample_text/is_likely_artifact/recording_available an
         // A real, substantial turn -- sample_text should be extracted,
         // is_likely_artifact should be false (avg turn well above the gate).
         SPEAKER_0: {
-          embedding: [1.0, 0.0], speech_duration_seconds: 2.0, segment_count: 1,
-          segments: [{ start: 0.5, end: 2.5 }],
+          embedding: [1.0, 0.0], speech_duration_seconds: 5.0, segment_count: 2,
+          segments: [{ start: 0.5, end: 2.5 }, { start: 4.0, end: 7.0 }],
         },
         // The real-library echo-artifact shape: many short scattered turns.
         SPEAKER_1: {
@@ -423,6 +431,14 @@ test('identification aids: sample_text/is_likely_artifact/recording_available an
     { stem, sid: 'SPEAKER_0', runId: fixtureDiarizationRunId(stem) },
   );
   expect(sample.success).toBe(true);
+  // The longest raw segment has no quote. The card must play the quoted
+  // excerpt, byte-for-byte identical to playing that expanded row.
+  const excerpt = await page.evaluate(
+    (args) => (window as StenoWindow).stenoai.speakers.getSampleAudio(args.stem, 'mic', args.sid, args.runId, 0),
+    { stem, sid: 'SPEAKER_0', runId: fixtureDiarizationRunId(stem) },
+  );
+  expect(excerpt.success).toBe(true);
+  expect(sample.audio_base64).toBe(excerpt.audio_base64);
   const bytes = Buffer.from(sample.audio_base64 as string, 'base64');
   // A real WAV file starts with the RIFF magic bytes -- proves ffmpeg
   // actually extracted real audio, not a stub/placeholder.

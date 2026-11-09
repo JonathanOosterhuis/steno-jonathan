@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { t } from '@/i18n';
 import type { Meeting } from '@/lib/ipc';
 import { LANGUAGES_WHISPER } from '@/routes/settings/languages';
+import { useUserName } from '@/hooks/useSettings';
 import { useMeeting } from '@/hooks/useMeetings';
 import { parseTranscript, type Segment } from '@/lib/transcriptSegments';
 
@@ -18,6 +19,7 @@ export function TranscriptPanelContent({
   onClose?: () => void;
 }) {
   const meeting = useMeeting(summaryFile);
+  const { data: ownName } = useUserName();
 
   if (meeting.isLoading) {
     return <div className="px-4 py-3 text-sm text-muted-foreground">Loading…</div>;
@@ -31,7 +33,7 @@ export function TranscriptPanelContent({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TranscriptLanguageInfo meeting={m} />
-      <TranscriptBody text={text} isDiarised={isDiarised} />
+      <TranscriptBody text={text} isDiarised={isDiarised} ownName={ownName} />
     </div>
   );
 }
@@ -89,7 +91,16 @@ export function OrgTranscriptPanelContent({ transcript }: { transcript: string }
 }
 
 
-function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolean }) {
+function normalizeSpeaker(name?: string) {
+  return name?.normalize('NFKC').trim().toLocaleLowerCase();
+}
+
+function TranscriptBody({ text, isDiarised, ownName }: {
+  text: string;
+  isDiarised: boolean;
+  ownName?: string;
+}) {
+  const owner = normalizeSpeaker(ownName);
   const segments = React.useMemo(() => parseTranscript(text, isDiarised), [text, isDiarised]);
   const [query, setQuery] = React.useState('');
 
@@ -155,7 +166,7 @@ function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolea
                 }}
                 className="py-1"
               >
-                <TranscriptRow segment={segment} highlight={query} />
+                <TranscriptRow segment={segment} highlight={query} owner={owner} />
               </div>
             );
           })}
@@ -165,25 +176,13 @@ function TranscriptBody({ text, isDiarised }: { text: string; isDiarised: boolea
   );
 }
 
-function TranscriptRow({ segment, highlight }: { segment: Segment; highlight: string }) {
-  // Granola-style chat bubbles for every line, including non-diarised
-  // (mono / mic-only / bleed-collapsed) recordings. Position (right vs
-  // left) and tint do the speaker-attribution work; explicit "You" /
-  // "Others" pill labels are redundant once the visual cue is there.
-  // Max-width keeps long monologues readable rather than spanning the
-  // whole panel.
-  //
-  // Default to "You" when we have no speaker marker: this covers mono-mic
-  // recordings (no stereo source) and bleed-collapsed stereo recordings
-  // where transcriber.py decided the system channel was just mic echo.
-  // In both cases the recording mechanically belongs to the user and
-  // showing their content as un-bubbled plain text (or worse, on the
-  // "Others" side) reads as wrong. Granola takes the same charitable
-  // default — when in doubt, attribute to the mic owner. Explicit
-  // `Others` markers and acoustically-diarized `Speaker N` markers
-  // (transcriber.py's _resolve_speaker_placeholders) both render as
-  // grey/left — only an exact "You" (or no marker at all) is "self".
-  const isYou = segment.speaker === 'You' || segment.speaker == null;
+function TranscriptRow({ segment, highlight, owner }: {
+  segment: Segment;
+  highlight: string;
+  owner?: string;
+}) {
+  const isYou = segment.speaker === 'You' || segment.speaker == null
+    || (!!owner && normalizeSpeaker(segment.speaker) === owner);
   // Every acoustic speaker label carries information because several
   // distinct speakers can share the grey/left lane. Keep only the channel-
   // level "Others" marker implicit; show both confirmed names and Speaker N.
