@@ -52,6 +52,9 @@ function suggestionLabel(suggestion: SpeakerSuggestion): string {
   if (suggestion.confirmed_by_user) {
     return `✓ Confirmed as ${suggestion.confirmed_by_user}`;
   }
+  if (suggestion.recognized_in_continuation) {
+    return `Recognized as ${suggestion.recognized_in_continuation}`;
+  }
   if (suggestion.status === 'confirmed' && suggestion.suggested_name) {
     return `Likely ${suggestion.suggested_name}`;
   }
@@ -468,13 +471,12 @@ export function SpeakerReviewPanel({
   // lives on the row itself -- burying that behind a toggle would hide the
   // only way back from a misclick.
   const isFiltered = (row: Row) =>
-    (row.suggestion.is_likely_artifact || nothingActionable(row))
+    (row.suggestion.is_likely_artifact || (!row.suggestion.from_continuation && nothingActionable(row)))
     && !row.suggestion.contains_multiple_speakers
     && !isKeptGeneric(row.suggestion);
   const filteredRows = rows.filter(isFiltered);
   const primaryRows = rows.filter((row) => !isFiltered(row));
   const visibleRows = showFiltered ? rows : primaryRows;
-  const recordingAvailable = suggestionsQuery.data?.recording_available ?? false;
   const staleNotice = staleAssignmentNotice(suggestionsQuery.data?.stale_assignments);
 
   const duplicateProfile = newPersonName.trim()
@@ -655,6 +657,9 @@ export function SpeakerReviewPanel({
             confirmSpeaker.isPending || markCluster.isPending || setReviewState.isPending;
           const isMarked = row.suggestion.contains_multiple_speakers;
           const isKept = isKeptGeneric(row.suggestion);
+          const recordingAvailable = row.suggestion.recording_available
+            ?? suggestionsQuery.data?.recording_available
+            ?? false;
           const samples = row.suggestion.samples ?? [];
           const isExpanded = expanded.has(key);
           // Expanding is only worth offering when there is more than the
@@ -767,7 +772,7 @@ export function SpeakerReviewPanel({
                     person stay available to correct a wrong confirmation. */}
                 {row.suggestion.status !== 'none' &&
                   row.suggestion.suggested_person_id &&
-                  !row.suggestion.confirmed_by_user && (
+                  !row.suggestion.confirmed_by_user && !row.suggestion.recognized_in_continuation && (
                     <Button
                       size="sm"
                       variant="default"

@@ -72,3 +72,13 @@ describe('parseTranscript — non-diarised', () => {
     expect(parseTranscript('   ', false)).toEqual([]);
   });
 });
+
+test('keeps plain and named turns from different passes of a resumed note', () => {
+  expect(parseTranscript(
+    'First pass was live text.\n\n--- Resumed 11:42 ---\n\n[00:01] [Alice] Second pass.',
+    false,
+  )).toEqual([
+    { speaker: null, text: 'First pass was live text.' },
+    { speaker: 'Alice', text: 'Second pass.', timestamp: '00:01' },
+  ]);
+});

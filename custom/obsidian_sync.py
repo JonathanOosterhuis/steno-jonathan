@@ -808,7 +808,10 @@ def sync_one(cfg, synced, path, dry_run, force):
     if entry.get("source_hash") == source_hash and not force:
         return False
     meta, body, embedded = parse_steno_note(raw)
-    transcript = canonical or embedded
+    # The standalone transcript belongs to the first diarization run.
+    # A continued note's embedded transcript also has the appended speech.
+    continued = re.search(r"^--- Resumed \d{2}:\d{2} ---[ \t]*$", embedded, re.M)
+    transcript = embedded if continued else canonical or embedded
     unfinished = incomplete_reason(meta, raw, transcript)
     if unfinished:
         if entry.get("waiting_hash") != source_hash:

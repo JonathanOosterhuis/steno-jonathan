@@ -2,7 +2,6 @@ import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { writeUserConfig } from '../fixtures/user-config';
 import { startMockOllama } from '../fixtures/mock-ollama';
-import { killOllama } from '../fixtures/kill-ollama';
 import { makeWav } from '../fixtures/make-wav';
 import { spawn } from 'child_process';
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'fs';
@@ -54,7 +53,7 @@ type SpawnResult = { code: number | null; stdout: string; stderr: string };
 function runBackend(args: string[], userDataDir: string): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     const proc = spawn(BACKEND, args, {
-      env: { ...process.env, STENOAI_USER_DATA_DIR: userDataDir },
+      env: { ...process.env, STENOAI_USER_DATA_DIR: userDataDir, STENOAI_OAI_API_KEY: '' },
     });
     let stdout = '';
     let stderr = '';
@@ -72,7 +71,11 @@ test('append folds a second segment into the note, marks it stale, and reprocess
   test.skip(!existsSync(BACKEND), 'backend bundle not built');
 
   const realDirBefore = fileSig(realUserDataDir());
-  writeUserConfig(userDataDir, { ai_provider: 'local', auto_summarize_enabled: false });
+  // The RMS gate skips both silent channels. Pick the lazy, model-free
+  // engine so even a platform with no Parakeet does not download Whisper.
+  writeUserConfig(userDataDir, {
+    ai_provider: 'local', auto_summarize_enabled: false, transcription_engine: 'openai-asr',
+  });
 
   const recordingsDir = path.join(userDataDir, 'recordings');
   mkdirSync(recordingsDir, { recursive: true });
@@ -123,8 +126,8 @@ test('append folds a second segment into the note, marks it stale, and reprocess
 
   // ── Regenerate: reprocess reads the combined transcript, writes the
   // summary, and clears the stale flag. One mock-Ollama call.
-  killOllama();
-  const ollama = await startMockOllama({ chatReply: FIXED_REPLY });
+  const ollama = await startMockOllama({ port: 0, chatReply: FIXED_REPLY });
+  writeUserConfig(userDataDir, { ai_provider: 'remote', remote_ollama_url: ollama.url });
   try {
     const res3 = await runBackend(['reprocess', summaryPath], userDataDir);
     expect(res3.code, `reprocess stderr:\n${res3.stderr}\n${res3.stdout}`).toBe(0);
@@ -137,9 +140,36 @@ test('append folds a second segment into the note, marks it stale, and reprocess
     // The combined transcript survives the rewrite.
     expect(md).toContain(SEGMENT_ONE);
     expect(md).toContain(SEGMENT_TWO);
+
+    writeUserConfig(userDataDir, { auto_summarize_enabled: true });
+    const next = 'Third segment: invite the delivery team.';
+    const wav = path.join(recordingsDir, 'auto-resume.wav');
+    const live = path.join(userDataDir, 'auto-resume.txt');
+    makeWav(wav, { seconds: 4, amplitude: 0, channels: 2 });
+    writeFileSync(live, next);
+    const automatic = await runBackend(
+      ['process-streaming', wav, '--name', 'Planning', '--live-transcript', live, '--append-to', summaryPath],
+      userDataDir,
+    );
+    expect(automatic.code, automatic.stderr).toBe(0);
+    expect(automatic.stdout).toContain('STREAM_COMPLETE');
+    expect(automatic.stdout).toContain(`SAVED:${summaryPath}`);
+    expect(ollama.chatCalls()).toBe(2);
+    for (const segment of [SEGMENT_ONE, SEGMENT_TWO, next]) {
+      expect(ollama.lastChatPrompt()).toContain(segment);
+    }
+    md = readFileSync(summaryPath, 'utf8');
+    expect(md).toContain(next);
+    expect(md).not.toMatch(/notes_stale/);
   } finally {
     await ollama.close();
   }
+
+  const continued = readFileSync(summaryPath, 'utf8');
+  const retranscribe = await runBackend(['reprocess', summaryPath, '--retranscribe'], userDataDir);
+  expect(retranscribe.code).not.toBe(0);
+  expect(retranscribe.stdout).toContain('RETRANSCRIBE_CONTINUED_NOTE');
+  expect(readFileSync(summaryPath, 'utf8')).toBe(continued);
 
   // ── Failed continuation: silent audio with NO live rescue must exit
   // non-zero and leave the note byte-for-byte untouched.

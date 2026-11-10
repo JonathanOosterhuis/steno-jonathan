@@ -171,6 +171,8 @@ function DetailContent({
   routeSummaryFile: string;
 }) {
   const info = meeting.session_info;
+  const hasContinuation = Boolean(info.continuation_ids?.length) ||
+    /^--- Resumed \d{2}:\d{2} ---[ \t]*$/m.test(meeting.diarised_text || meeting.transcript || '');
   const summaryFile = info.summary_file;
   const date = formatDetailDate(info);
   const duration = formatDuration(info.duration_seconds);
@@ -952,7 +954,7 @@ function DetailContent({
                 {/* Re-transcribe (#266): only when the source recording still
                     exists (keep-recordings was on). Disabled while a stream is on
                     screen or a recording is live on this note. */}
-                {recordingAvailable.data === true && (
+                {recordingAvailable.data === true && !hasContinuation && (
                   <button
                     type="button"
                     className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[color:var(--surface-hover)] disabled:opacity-50"
