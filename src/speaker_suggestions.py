@@ -1,5 +1,5 @@
 """Named (non-self) speaker identification: rank known PersonProfiles as
-candidates for a diarized cluster, but never auto-assign — a human confirms
+candidates for a diarized cluster. For a new note a human confirms
 via the CLI (`suggest-speakers`) today and the approval UI later (see the
 plan doc). This replaces the silent auto-matching that used to live in
 src.transcriber._apply_voiceprint_matches's named-matching path, removed
@@ -47,7 +47,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -253,6 +253,7 @@ class ClusterContext:
     # it back: unlike contains_multiple_speakers it feeds no score and no
     # gate, because it describes the reviewer's progress and not the voice.
     review_state: Optional[str] = None
+    source_recording: Optional[str] = None
 
 
 @dataclass
@@ -502,7 +503,7 @@ def suggest_speakers_for_meeting(
         available_candidates = [
             candidate
             for candidate in candidates
-            if candidate.person_id not in used_person_ids
+            if (context.source_recording, candidate.person_id) not in used_person_ids
         ]
         result = suggest_speaker(
             embedding,
@@ -511,7 +512,7 @@ def suggest_speakers_for_meeting(
             scored_candidates=available_candidates,
         )
         if result.status == "confirmed" and result.suggested_person_id:
-            used_person_ids.add(result.suggested_person_id)
+            used_person_ids.add((context.source_recording, result.suggested_person_id))
         results[channel][sid] = result
     return results
 
@@ -566,6 +567,8 @@ def merge_same_channel_fragments(clusters: dict) -> tuple:
     for i in range(len(sids)):
         for j in range(i + 1, len(sids)):
             a, b = sids[i], sids[j]
+            if clusters[a][1].source_recording != clusters[b][1].source_recording:
+                continue
             try:
                 close = (
                     cosine_distance(clusters[a][0], clusters[b][0])
@@ -618,6 +621,7 @@ def merge_same_channel_fragments(clusters: dict) -> tuple:
                 speech_duration_seconds=total_duration,
                 segment_count=total_segments,
                 merged_from=others,
+                source_recording=primary_context.source_recording,
                 # Contamination is a property of the AUDIO, so it survives
                 # the merge: folding a mixed fragment into a clean one
                 # produces a mixed cluster, not a clean one. Marking any
@@ -1100,11 +1104,12 @@ def minimum_speaker_count(channels: dict) -> int:
         # A group counts as mixed if ANY of its members was marked: the
         # human said two people share that voice, and merging it with a
         # fragment of itself does not make that untrue.
-        marked = sum(
-            1 for members in groups
-            if any(raw.get(member, {}).get(MULTI_SPEAKER_KEY) for member in members)
-        )
-        largest = max(largest, len(groups) + marked)
+        counts = {}
+        for members in groups:
+            source = raw.get(members[0], {}).get("source_recording")
+            marked = any(raw.get(member, {}).get(MULTI_SPEAKER_KEY) for member in members)
+            counts[source] = counts.get(source, 0) + 1 + marked
+        largest = max(largest, max(counts.values(), default=0))
     return largest
 
 
@@ -1143,6 +1148,7 @@ def clusters_from_sidecar_channel(meeting_id: str, channel: dict) -> dict:
                 segment_count=cluster.get("segment_count", 0),
                 contains_multiple_speakers=bool(cluster.get(MULTI_SPEAKER_KEY)),
                 review_state=cluster.get(REVIEW_STATE_KEY),
+                source_recording=cluster.get("source_recording"),
             ),
         )
     return out
@@ -1185,6 +1191,8 @@ def relabel_transcript_speaker(
     transcript_path: Path,
     segments: list,
     display_name: str,
+    *,
+    original_pass_only: bool = False,
 ) -> int:
     """Rewrite a saved transcript's diarised `[MM:SS] [Label] text` lines,
     replacing Label with `display_name` for every line whose timestamp
@@ -1218,7 +1226,7 @@ def relabel_transcript_speaker(
         return 0
 
     relabeled_text, changed = relabel_transcript_text_speaker(
-        original, segments, display_name,
+        original, segments, display_name, original_pass_only=original_pass_only,
     )
 
     if changed:
@@ -1555,6 +1563,8 @@ def relabel_transcript_text_speaker(
     transcript_text: str,
     segments: list,
     display_name: str,
+    *,
+    original_pass_only: bool = False,
 ) -> tuple[str, int]:
     """Apply the legacy segment-based relabeling rules to in-memory text."""
     if not segments:
@@ -1563,6 +1573,8 @@ def relabel_transcript_text_speaker(
     lines = transcript_text.split("\n")
     changed = 0
     for index, line in enumerate(lines):
+        if original_pass_only and re.fullmatch(r"--- Resumed \d{2}:\d{2} ---[ \t]*", line):
+            break
         match = _TRANSCRIPT_LINE_RE.match(line)
         if not match:
             continue
@@ -2460,6 +2472,136 @@ def extract_speaker_sample_audio(
     except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning("Could not extract speaker sample audio: %s", e)
         return False
+
+
+def identify_continuation_speakers(
+    text: str, channels: dict, manifest: list, meeting_stem: str,
+    original_sidecar: dict, profiles: list,
+) -> tuple[str, dict]:
+    """Return relabeled text and the exact new cluster ids recognized."""
+
+    original_channels = original_sidecar.get("channels") or {}
+    run_id = (original_sidecar.get("diarization_run") or {}).get("run_id")
+    matches = []
+    for channel, data in channels.items():
+        original = original_channels.get(channel) or {}
+        original_clusters = original.get("clusters") or {}
+        merged, _ = merge_same_channel_fragments(clusters_from_sidecar_channel(meeting_stem, data))
+        for sid, (embedding, context) in merged.items():
+            candidates = score_candidates(embedding, context, profiles)
+            if not candidates:
+                continue
+            best = candidates[0]
+            person = next(person for person in profiles if person["person_id"] == best.person_id)
+            # A single confirmation can carry across a stop, but only with
+            # a tight match to that exact meeting's current same-channel evidence.
+            for prototype in person.get("prototypes") or []:
+                cluster = original_clusters.get(prototype.get("diarization_speaker_id"))
+                if (
+                    not cluster or cluster.get(MULTI_SPEAKER_KEY) or cluster.get(REVIEW_STATE_KEY)
+                    or prototype.get("meeting_id") != meeting_stem
+                    or not prototype_run_matches(prototype, run_id)
+                    or not prototype_channel_matches(prototype, channel, original.get("recording_type"))
+                ):
+                    continue
+                try:
+                    distance = cosine_distance(embedding, prototype.get("embedding_mean"))
+                except (TypeError, ValueError):
+                    continue
+                if distance < SAME_MEETING_MERGE_DISTANCE_THRESHOLD:
+                    candidates[0] = replace(best, confirmed_meeting_count=SUGGESTION_MIN_CONFIRMED_MEETINGS)
+                    result = suggest_speaker(embedding, context, [], scored_candidates=candidates)
+                    if result.status == "confirmed":
+                        targets = {(channel, fid) for fid in [sid, *context.merged_from]}
+                        matches.append((best.distance, best.person_id, best.display_name, targets))
+                    break
+
+    used = set()
+    recognized = {}
+    for _, person_id, name, targets in sorted(matches, key=lambda item: item[0]):
+        if person_id not in used:
+            text, count = restore_transcript_text_labels(text, manifest, targets, replacement_label=name)
+            if count:
+                used.add(person_id)
+                recognized.update(dict.fromkeys(targets, person_id))
+    return text, recognized
+
+
+def extend_speaker_analysis(
+    sidecar: dict, old_text: str, old_canonical: str, new_text: str,
+    channels: dict, manifest: list, recording_stem: str, duration: int,
+    recognized: dict,
+) -> str:
+    """Append a run with disjoint cluster IDs and offsets in the note's timebase."""
+    from src.transcriber import _format_timestamp
+
+    def starts(text):
+        return [
+            _safe_transcript_timestamp(match.group(1))
+            for line in text.splitlines()
+            if (match := _TRANSCRIPT_LINE_RE.match(line))
+        ]
+
+    old_starts = starts(old_text)
+    old_manifest = sidecar.get("transcript_lines") or []
+    if not old_manifest and any(channel.get("clusters") for channel in sidecar["channels"].values()):
+        sidecar["legacy_original_timestamps"] = True
+    if old_manifest and (
+        not old_canonical
+        or not (old_text == old_canonical or (old_text.startswith(old_canonical)
+            and old_text[len(old_canonical):].lstrip().startswith("--- Resumed ")))
+        or len(starts(old_canonical)) != len(old_manifest)
+        or not _manifest_describes_lines(starts(old_canonical), old_manifest)
+    ):
+        raise ValueError("Existing transcript no longer matches its speaker analysis")
+    new_starts = starts(new_text)
+    if not manifest and not channels:
+        sidecar["transcript_lines"] = [*old_manifest, *(
+            {} for _ in range(len(old_starts) - len(old_manifest) + len(new_starts))
+        )]
+        return new_text
+    if len(new_starts) != len(manifest) or not _manifest_describes_lines(new_starts, manifest):
+        raise ValueError("Continuation transcript does not match its speaker analysis")
+
+    # Earlier builds stored resumed text in the note without its provenance.
+    # Retain those turns, but never assign them to a guessed cluster.
+    combined = [*old_manifest, *({} for _ in range(len(old_starts) - len(old_manifest)))]
+    offset = max(int(duration), 1 + int(max((s for s in old_starts if s is not None), default=-1)))
+    lookup = {}
+    for channel, data in channels.items():
+        existing = sidecar["channels"].setdefault(channel, {
+            "recording_type": data["recording_type"], "clusters": {},
+        })
+        clusters = existing["clusters"]
+        next_id = 1 + max((int(sid[8:]) for sid in clusters if re.fullmatch(r"SPEAKER_\d+", sid)), default=-1)
+        for sid, cluster in data["clusters"].items():
+            new_id = f"SPEAKER_{next_id}"
+            next_id += 1
+            lookup[channel, sid] = new_id
+            clusters[new_id] = {
+                **cluster,
+                "source_recording": recording_stem,
+                "source_offset": offset,
+                "recognized_person_id": recognized.get((channel, sid)),
+                "segments": [
+                    {**seg, "start": seg["start"] + offset, "end": seg["end"] + offset}
+                    for seg in cluster.get("segments") or []
+                ],
+            }
+
+    lines = new_text.splitlines()
+    line_indices = [i for i, line in enumerate(lines) if _TRANSCRIPT_LINE_RE.match(line)]
+    for index, entry, marker in zip(line_indices, manifest, new_starts):
+        start = entry.get("start")
+        if not isinstance(start, (int, float)) or not math.isfinite(start):
+            start = marker
+        new_start = offset + start
+        channel = entry.get("channel")
+        mapped = lookup.get((channel, entry.get("diarization_speaker_id")))
+        combined.append({"start": new_start, "channel": channel, "diarization_speaker_id": mapped})
+        lines[index] = f"[{_format_timestamp(new_start)}]" + lines[index].split("]", 1)[1]
+    sidecar["transcript_lines"] = combined
+    return "\n".join(lines)
 
 
 def suggested_title_names(meeting_stem: str, sidecar: dict, profiles: list) -> list:

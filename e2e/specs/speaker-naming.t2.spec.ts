@@ -518,3 +518,90 @@ test('duplicate person names are rejected, and delete-person-profile removes a p
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
 });
+
+test('resumed speakers are reviewable alongside existing confirmations', async ({
+  launchApp,
+  userDataDir,
+}) => {
+  const stem = 'e2e-resumed-speakers';
+  const runId = fixtureDiarizationRunId(stem);
+  const resumed = 'e2e-resumed-audio';
+  const recordings = path.join(userDataDir, 'recordings');
+  mkdirSync(recordings, { recursive: true });
+  enableSpeakerIdentification(userDataDir);
+  writeUserConfig(userDataDir, { privacy_notice_seen: true });
+  const transcript = [
+    '[00:01] [Speaker 1] Original participant.',
+    '--- Resumed 10:00 ---',
+    '[00:32] [Speaker 2] The new participant.',
+    '[00:36] [Person Alpha] The returning participant.',
+  ].join('\n\n');
+  const summary = writeMeetingMarkdown(userDataDir, stem, {
+    name: 'Resumed speaker review', summaryMarkdown: '## Summary\n\nA meeting.',
+    transcript, frontmatter: { is_diarised: true },
+  });
+  writeTranscriptFile(userDataDir, stem, transcript);
+  const continuationSource = { source_recording: resumed, source_offset: 30 };
+  const sidecar = writeSpeakersSidecar(userDataDir, stem, {
+    mic: {
+      recording_type: 'in_person',
+      clusters: {
+        SPEAKER_0: {
+          embedding: [1, 0], speech_duration_seconds: 3, segment_count: 1,
+          segments: [{ start: 1, end: 4 }],
+        },
+        SPEAKER_1: {
+          ...continuationSource, embedding: [0, 1], speech_duration_seconds: 3,
+          segment_count: 1, segments: [{ start: 32, end: 35 }],
+        },
+        SPEAKER_2: {
+          ...continuationSource, embedding: [1, 0], speech_duration_seconds: 3,
+          segment_count: 1, segments: [{ start: 36, end: 39 }],
+        },
+      },
+    },
+  }, [1, 32, 36].map((start, index) => ({
+    start, channel: 'mic', diarization_speaker_id: `SPEAKER_${index}`,
+  })));
+
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
+  makeWav(path.join(recordings, `${resumed}.wav`), { seconds: 10, channels: 2 });
+  const first = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
+    { meetingStem: stem, channel: 'mic', diarizationSpeakerId: 'SPEAKER_0',
+      expectedRunId: runId, newPersonName: 'Person Alpha' },
+  );
+  expect(first.success, first.error).toBe(true);
+  const analysis = readJson(sidecar);
+  analysis.channels.mic.clusters.SPEAKER_2.recognized_person_id = first.person_id;
+  writeFileSync(sidecar, JSON.stringify(analysis));
+
+  await page.evaluate((file) => {
+    window.location.hash = `#/meetings/${encodeURIComponent(file)}`;
+  }, summary);
+  const firstRow = page.getByTestId('speaker-row-mic:SPEAKER_0');
+  const newRow = page.getByTestId('speaker-row-mic:SPEAKER_1');
+  const returningRow = page.getByTestId('speaker-row-mic:SPEAKER_2');
+  await expect(firstRow).toContainText('Confirmed as Person Alpha');
+  await expect(returningRow).toContainText('Recognized as Person Alpha');
+  await expect(returningRow.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+  await expect(newRow).toContainText('The new participant.');
+
+  const sample = await page.evaluate(
+    ({ stem, runId }) => (window as StenoWindow).stenoai.speakers.getSampleAudio(stem, 'mic', 'SPEAKER_1', runId),
+    { stem, runId },
+  );
+  expect(sample.success, sample.error).toBe(true);
+  expect(Buffer.from(sample.audio_base64 as string, 'base64').length).toBeGreaterThan(44);
+
+  const named = await page.evaluate(
+    (params) => (window as StenoWindow).stenoai.speakers.confirm(params),
+    { meetingStem: stem, channel: 'mic', diarizationSpeakerId: 'SPEAKER_1',
+      expectedRunId: runId, newPersonName: 'Person Beta' },
+  );
+  expect(named.success, named.error).toBe(true);
+  const saved = readFileSync(summary, 'utf8');
+  expect(saved).toContain('[00:01] [Person Alpha] Original participant.');
+  expect(saved).toContain('[00:32] [Person Beta] The new participant.');
+  expect(saved).toContain('[00:36] [Person Alpha] The returning participant.');
+});

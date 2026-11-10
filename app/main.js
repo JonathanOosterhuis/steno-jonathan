@@ -5933,9 +5933,8 @@ async function processNextInQueue() {
       processArgs.push('--live-transcript', currentProcessingJob.liveTranscriptFile);
     }
     // Continue-recording: fold this segment into an existing note instead of
-    // creating a new one. The backend appends the transcript, marks the note
-    // notes_stale, and emits SAVED:<target> so the completion event points at
-    // the continued note.
+    // creating a new one. The backend appends the transcript, refreshes notes
+    // if enabled, and emits SAVED:<target> for the continued note.
     if (currentProcessingJob.appendTo && fs.existsSync(currentProcessingJob.appendTo)) {
       processArgs.push('--append-to', currentProcessingJob.appendTo);
     }

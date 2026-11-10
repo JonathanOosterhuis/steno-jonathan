@@ -51,6 +51,7 @@ export interface SessionInfo {
    *  its notes were generated: the summary no longer covers the full
    *  transcript. The UI offers the "Generate notes" CTA; reprocess clears it. */
   notes_stale?: boolean;
+  continuation_ids?: string[];
   /** Instant-stop placeholder: the note was written from the live transcript
    *  at stop and the batch transcribe/summarise is still upgrading it in the
    *  background. The detail view shows a quiet "finishing up" affordance; the
@@ -512,6 +513,9 @@ export interface SpeakerSample {
   text: string | null;
 }
 export interface SpeakerSuggestion {
+  from_continuation?: boolean;
+  recording_available?: boolean;
+  recognized_in_continuation?: string | null;
   status: 'confirmed' | 'possible' | 'none';
   suggested_person_id: string | null;
   suggested_name: string | null;

@@ -1190,7 +1190,7 @@ def _unusable_batch_reason(
     return None
 
 
-def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
+def _append_segment_to_note(target: Path, new_text: str, duration_seconds, segment_id: str, *, diarised=False):
     """Fold a continue-recording segment into an existing note.
 
     Appends `new_text` (with a resumed-at separator) to the note's Transcript
@@ -1209,6 +1209,10 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
     added_seconds = int(duration_seconds) if duration_seconds else 0
 
     if target.suffix == '.md':
+        info = _parse_meeting_markdown(target)['session_info']
+        appended = info.get('continuation_ids', [])
+        if segment_id in appended:
+            return
         content = target.read_text(encoding='utf-8')
 
         # 1. Frontmatter surgery: upsert notes_stale + extend duration.
@@ -1218,7 +1222,7 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
             head, mid, rest = content.split('---', 2)
             fm_lines = [
                 ln for ln in mid.strip().split('\n')
-                if not ln.startswith('notes_stale:')
+                if not ln.startswith(('notes_stale:', 'continuation_ids:'))
             ]
             for i, ln in enumerate(fm_lines):
                 if ln.startswith('duration_seconds:'):
@@ -1228,7 +1232,11 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
                     except ValueError:
                         pass
                     break
+            if diarised:
+                fm_lines = [line for line in fm_lines if not line.startswith('is_diarised:')]
+                fm_lines.append('is_diarised: true')
             fm_lines.append('notes_stale: true')
+            fm_lines.append('continuation_ids: ' + json.dumps([*appended, segment_id]))
             content = f"---\n{chr(10).join(fm_lines)}\n---{rest}"
         # (A .md note without frontmatter shouldn't exist; append-only below.)
 
@@ -1245,8 +1253,16 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
     else:
         with open(target, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        data['transcript'] = (data.get('transcript') or '').rstrip('\n') + segment
         si = data.setdefault('session_info', {})
+        appended = si.setdefault('continuation_ids', [])
+        if segment_id in appended:
+            return
+        appended.append(segment_id)
+        previous = data.get('diarised_text') or data.get('transcript') or ''
+        data['transcript'] = previous.rstrip('\n') + segment
+        if diarised or data.get('is_diarised'):
+            data['is_diarised'] = True
+            data['diarised_text'] = data['transcript']
         si['notes_stale'] = True
         if added_seconds and isinstance(si.get('duration_seconds'), int):
             si['duration_seconds'] += added_seconds
@@ -1256,6 +1272,110 @@ def _append_segment_to_note(target: Path, new_text: str, duration_seconds):
         "Appended %d chars (+%ds) to %s and marked notes_stale",
         len(new_text), added_seconds, target,
     )
+
+
+def _append_recording_segment(recorder, target, segment_id, segment_text, transcript_data, cfg):
+    """Commit the appended text and its speaker evidence under the meeting lock."""
+    from src.speaker_sidecar_store import SpeakerSidecarStore
+    from src.speaker_suggestions import (
+        extend_speaker_analysis,
+        identify_continuation_speakers,
+        write_sidecar_document,
+    )
+
+    stem = target.stem.removesuffix("_summary")
+    store = SpeakerSidecarStore(recorder.output_dir)
+    canonical = recorder.transcripts_dir / f"{stem}_transcript.txt"
+    pending_path = store.lock_path(stem).with_suffix(".resume.json")
+
+    def sidecar_digest():
+        path = store.path(stem)
+        return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+    with store.lock(stem):
+        note = (_parse_meeting_markdown(target) if target.suffix == ".md"
+                else json.loads(target.read_text(encoding="utf-8")))
+        info = note["session_info"]
+        appended = info.get("continuation_ids", [])
+        if pending_path.exists():
+            pending = json.loads(pending_path.read_text(encoding="utf-8"))
+            if pending["segment_id"] in appended:
+                current = store.read(stem)
+                if current != pending["sidecar"]:
+                    if sidecar_digest() != pending["base_digest"]:
+                        raise ValueError("Speaker analysis changed before the continuation could finish.")
+                    combined = note.get("diarised_text") or note.get("transcript") or ""
+                    _atomic_write_text(canonical, combined.strip() + "\n")
+                    write_sidecar_document(recorder.output_dir, stem, pending["sidecar"], acquire_lock=False)
+            pending_path.unlink()
+        if segment_id in appended:
+            return
+        duration = transcript_data.get("duration_seconds")
+        diarised = bool(transcript_data.get("diarised_text"))
+        manifest = transcript_data.get("turn_manifest") or []
+        channels = transcript_data.get("speaker_clusters") or {}
+        original = store.read(stem)
+        if not original and not (channels and manifest and cfg.get_identity_matching_enabled()):
+            _append_segment_to_note(target, segment_text, duration, segment_id, diarised=diarised)
+            return
+        if original and original.get(_PENDING_SUMMARY_TRANSCRIPT_SYNC_KEY):
+            raise ValueError("Finish the pending speaker confirmation before continuing this note.")
+
+        import copy
+        import uuid
+        sidecar = copy.deepcopy(original) if original else {
+            "meeting_id": stem, "created_at": time.time(), "channels": {},
+            "diarization_run": {"run_id": str(uuid.uuid4()), "created_at": time.time()},
+        }
+        _, old_text, read_failed = _summary_transcript_copy(target.parent, stem)
+        if read_failed:
+            raise OSError("Could not read the existing transcript.")
+        old_text = old_text or note.get("transcript") or ""
+        recognized = {}
+        try:
+            if original and channels and manifest and cfg.get_identity_matching_enabled():
+                segment_text, recognized = identify_continuation_speakers(
+                    segment_text, channels, manifest, stem, original, cfg.get_person_profiles(),
+                )
+            segment_text = extend_speaker_analysis(
+                sidecar, old_text, _saved_transcript_body(canonical) or "", segment_text,
+                channels, manifest, segment_id, info.get("duration_seconds") or 0, recognized,
+            )
+        except (KeyError, TypeError, ValueError):
+            logger.warning("Could not extend exact speaker provenance; preserving the continuation text.")
+            _append_segment_to_note(target, segment_text, duration, segment_id, diarised=diarised)
+            return
+
+        previous = {
+            path: path.read_text(encoding="utf-8") if path.exists() else None
+            for path in (target, canonical)
+        }
+        _atomic_write_json(pending_path, {
+            "segment_id": segment_id, "base_digest": sidecar_digest(), "sidecar": sidecar,
+        })
+        written = []
+        try:
+            _append_segment_to_note(target, segment_text, duration, segment_id, diarised=diarised)
+            written.append(target)
+            _, combined, failed = _summary_transcript_copy(target.parent, stem)
+            if failed:
+                raise OSError("Could not read back the combined transcript.")
+            if combined is None and target.suffix == ".json":
+                combined = json.loads(target.read_text(encoding="utf-8")).get("transcript")
+            if combined is None:
+                raise OSError("Could not find the combined transcript.")
+            _atomic_write_text(canonical, combined + "\n")
+            written.append(canonical)
+            write_sidecar_document(recorder.output_dir, stem, sidecar, acquire_lock=False)
+        except (OSError, ValueError):
+            for path in reversed(written):
+                if previous[path] is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _atomic_write_text(path, previous[path])
+            pending_path.unlink(missing_ok=True)
+            raise
+        pending_path.unlink(missing_ok=True)
 
 
 def _read_existing_user_notes(summary_path: Path):
@@ -1499,11 +1619,8 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         print(f"TRANSCRIPTION_SOURCE:{'live' if is_live_transcript else 'batch'}", flush=True)
         print(f"TRANSCRIPTION_COMPLETE:{len(transcript_text)}", flush=True)
 
-        # Continue-recording (append) path: fold this segment's transcript
-        # into the target note, mark it stale, and stop — no summary, no
-        # title, no new note. The user regenerates notes on demand (the
-        # floating "Regenerate notes" CTA drives `reprocess`, which reads the
-        # combined Transcript section and clears the stale flag on rewrite).
+        # A continuation updates the same note. Commit its transcript before
+        # summarizing so a model error still leaves a complete, retryable note.
         if append_to:
             from src.config import get_config as _get_config
             segment_text = diarised_text or transcript_text
@@ -1519,18 +1636,28 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
                     flush=True,
                 )
                 sys.exit(1)
-            _append_segment_to_note(
-                Path(append_to),
-                segment_text,
-                duration_seconds,
+            cfg = _get_config()
+            target = Path(append_to)
+            _append_recording_segment(
+                recorder, target, Path(audio_file).stem, segment_text, transcript_data, cfg,
             )
+            if cfg.get_auto_summarize_enabled():
+                try:
+                    reprocess.callback(str(target), regenerate_title=False, retranscribe=False)
+                except SystemExit as exc:
+                    if exc.code != 1:
+                        raise
+                    # Transcript is already saved. Keep notes_stale and let
+                    # Generate notes retry without appending the audio again.
+                    print("SUMMARY_SKIPPED", flush=True)
+            else:
+                print("SUMMARY_SKIPPED", flush=True)
             audio_path = Path(audio_file)
-            if not is_live_transcript and not _get_config().get_keep_recordings():
+            if not is_live_transcript and not cfg.get_keep_recordings():
                 try:
                     audio_path.unlink()
                 except OSError:
                     pass
-            print("SUMMARY_SKIPPED", flush=True)
             print(f"SAVED:{append_to}", flush=True)
             return
 
@@ -3241,6 +3368,8 @@ def _parse_meeting_markdown(md_path):
     # reprocess clears it when it rewrites the note.
     if meta.get('notes_stale'):
         session_info['notes_stale'] = True
+    if isinstance(meta.get('continuation_ids'), list):
+        session_info['continuation_ids'] = meta['continuation_ids']
     # An instant-stop placeholder: written from the live transcript at stop
     # while batch transcribe/summarise upgrades it in the background. Surface
     # the flag so the detail view shows a quiet "finishing up" affordance.
@@ -3467,6 +3596,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
     recorder = MeetingPipeline()
     summary_path = Path(summary_file)
     retranscribed_sidecar = None
+    continued_note_lock = None
 
     if not summary_path.exists():
         print(f"ERROR: Summary file not found: {summary_file}")
@@ -3489,7 +3619,15 @@ def reprocess(summary_file, regenerate_title, retranscribe):
         # nothing. The non-retranscribe path is unchanged (flag defaults false).
         if retranscribe:
             import asyncio
-            session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+            existing_info = existing_data.get('session_info', {})
+            existing_transcript = existing_data.get('diarised_text') or existing_data.get('transcript') or ''
+            if existing_info.get('continuation_ids') or re.search(
+                r"^--- Resumed \d{2}:\d{2} ---[ \t]*$", existing_transcript, re.MULTILINE,
+            ):
+                # The original audio alone cannot reconstruct a resumed note.
+                print("STREAM_ERROR:RETRANSCRIBE_CONTINUED_NOTE", flush=True)
+                sys.exit(1)
+            session_name = existing_info.get('name', 'Reprocessed')
             stem = summary_path.stem
             if stem.endswith('_summary'):
                 stem = stem[:-len('_summary')]
@@ -3589,6 +3727,7 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             sys.exit(1)
 
         session_name = existing_data.get('session_info', {}).get('name', 'Reprocessed')
+        original_name = session_name
         duration_minutes = existing_data.get('session_info', {}).get('duration_minutes', 10)
         if duration_minutes is None:
             ds = existing_data.get('session_info', {}).get('duration_seconds')
@@ -3685,6 +3824,30 @@ def reprocess(summary_file, regenerate_title, retranscribe):
                 print(f"TITLE:{session_name}", flush=True)
                 print(f"Auto-generated title: {session_name}")
 
+        continuing = existing_session_info.get('notes_stale') and not retranscribe
+        if not retranscribe and (continuing or existing_session_info.get('continuation_ids')):
+            from src.speaker_sidecar_store import SpeakerSidecarStore
+            stem = summary_path.stem.removesuffix("_summary")
+            lock = SpeakerSidecarStore(recorder.output_dir).lock(stem)
+            lock.acquire()
+            continued_note_lock = lock
+            latest = (_parse_meeting_markdown(summary_path) if summary_path.suffix == '.md'
+                      else json.loads(summary_path.read_text(encoding="utf-8")))
+            if (latest.get('transcript') != transcript
+                    or latest.get('diarised_text') != existing_data.get('diarised_text')
+                    or latest.get('participants') != existing_data.get('participants')):
+                print("STREAM_ERROR:CONTINUED_NOTE_CHANGED", flush=True)
+                sys.exit(1)
+            # Preserve edits made while the model was streaming.
+            latest_info = latest['session_info']
+            if latest_info.get('name', 'Reprocessed') == original_name:
+                latest_info['name'] = session_name
+            else:
+                automatic_title = latest_info.get('auto_title_base') == latest_info.get('name')
+            existing_data = latest
+            existing_session_info = latest_info
+            notes_text = latest.get('user_notes')
+
         # Add reprocess timestamp
         existing_data["session_info"]["reprocessed_at"] = datetime.now().isoformat()
 
@@ -3708,6 +3871,14 @@ def reprocess(summary_file, regenerate_title, retranscribe):
                 # should stay the default view after regenerate, so clear it:
                 _sidecar["active_report"] = None
                 report_store.save_sidecar(summary_path, _sidecar)
+
+        existing_participants = existing_data.get('participants') or []
+        if continuing and existing_participants and summary_path.suffix == '.md':
+            streamed_md = re.sub(
+                r"^## Participants[ \t]*\n.*?(?=^## |\Z)", "", streamed_md,
+                flags=re.MULTILINE | re.DOTALL | re.IGNORECASE,
+            ).rstrip()
+            streamed_md += "\n\n## Participants\n\n" + ", ".join(existing_participants)
 
         # Save updated summary
         if summary_path.suffix == '.md':
@@ -3738,6 +3909,8 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             # "only set when true, never explicit false" pattern used elsewhere.
             if existing_data.get('session_info', {}).get('is_live_transcript'):
                 md_meta['is_live_transcript'] = True
+            if existing_session_info.get('continuation_ids') and not retranscribe:
+                md_meta['continuation_ids'] = existing_session_info['continuation_ids']
             for k, v in md_meta.items():
                 if v is None:
                     md_lines.append(f'{k}: null')
@@ -3769,7 +3942,8 @@ def reprocess(summary_file, regenerate_title, retranscribe):
             parsed = recorder._parse_streamed_markdown(streamed_md)
             existing_data.update({
                 "summary": parsed.get("summary", "") or "",
-                "participants": parsed.get("participants", []) or [],
+                "participants": existing_participants if continuing and existing_participants
+                    else (parsed.get("participants", []) or []),
                 "discussion_areas": parsed.get("discussion_areas", []) or [],
                 "key_points": parsed.get("key_points", []) or [],
                 "action_items": parsed.get("action_items", []) or [],
@@ -3802,6 +3976,9 @@ def reprocess(summary_file, regenerate_title, retranscribe):
     except Exception as e:
         print(f"ERROR: Failed to reprocess summary: {e}")
         sys.exit(1)
+    finally:
+        if continued_note_lock is not None:
+            continued_note_lock.release()
 
 
 def _patch_summary_date(summary_path: Path, date_value: str) -> bool:
@@ -5575,11 +5752,15 @@ def _resolve_person_sample(
         if not pooled_segments:
             continue
 
-        if meeting_id not in recording_cache:
-            recording_cache[meeting_id] = _find_recording_file(
-                Path(dirs["recordings"]), meeting_id,
-            )
-        recording_path = recording_cache[meeting_id]
+        try:
+            source, offset = _cluster_recording_source(raw_clusters_by_id[resolved_id], meeting_id)
+        except ValueError:
+            continue
+        if source not in recording_cache:
+            finder = _find_recording_file if source == meeting_id else _find_recording_for_stem
+            recording_cache[source] = finder(Path(dirs["recordings"]), source)
+        recording_path = recording_cache[source]
+        pooled_segments = [_audio_local_range(segment, offset) for segment in pooled_segments]
         if recording_path is None:
             continue
 
@@ -5897,6 +6078,9 @@ def confirm_speaker(
     embedding, context = clusters[resolved_id]
     fragment_ids = {resolved_id, *context.merged_from}
     channel_recording_type = channel_data.get("recording_type")
+    use_legacy_original_timestamps = (
+        sidecar.get("legacy_original_timestamps") and context.source_recording is None
+    )
     prepared_transcript_path = None
     prepared_transcript_body = None
     prepared_turn_manifest = None
@@ -6024,7 +6208,8 @@ def confirm_speaker(
                 "error": "Could not read the transcript. Retry the confirmation.",
             }))
             sys.exit(1)
-        prepared_turn_manifest = sidecar.get("transcript_lines")
+        if not use_legacy_original_timestamps:
+            prepared_turn_manifest = sidecar.get("transcript_lines")
         if prepared_transcript_body is not None:
             if prepared_turn_manifest:
                 expected_transcript_body, _ = restore_transcript_text_labels(
@@ -6046,6 +6231,7 @@ def confirm_speaker(
                     prepared_transcript_body,
                     pooled_segments,
                     person["display_name"],
+                    original_pass_only=use_legacy_original_timestamps,
                 )
             summary_sync_ready, prepared_summary_sync_marker = (
                 _prepare_summary_transcript_sync(
@@ -6299,7 +6485,7 @@ def confirm_speaker(
             if prepared_transcript_path is not None
             else _saved_transcript_body(transcript_path)
         )
-        turn_manifest = prepared_turn_manifest or sidecar.get("transcript_lines")
+        turn_manifest = prepared_turn_manifest
         retry_relabel_target_ids = prepared_relabel_target_ids
         summary_sync_marker = prepared_summary_sync_marker
         try:
@@ -6324,7 +6510,8 @@ def confirm_speaker(
                         raw_clusters_by_id.get(fragment_id, {}).get("segments") or []
                     )
                 relabeled_lines = relabel_transcript_speaker(
-                    transcript_path, pooled_segments, person["display_name"]
+                    transcript_path, pooled_segments, person["display_name"],
+                    original_pass_only=use_legacy_original_timestamps,
                 )
         except OSError:
             logger.warning("Could not update canonical transcript during speaker confirmation")
@@ -7216,7 +7403,7 @@ def suggest_speakers(meeting_stem):
     # Most historical meetings have no source audio left (keep_recordings
     # defaults off) -- the panel needs to know this upfront rather than
     # discovering it only after a failed play click.
-    recording_path = _find_recording_file(dirs["recordings"], meeting_stem)
+    recording_cache = {meeting_stem: _find_recording_file(dirs["recordings"], meeting_stem)}
     transcript_path = dirs["transcripts"] / f"{meeting_stem}_transcript.txt"
 
     # Exact per-line provenance, present only on meetings recorded after the
@@ -7253,6 +7440,7 @@ def suggest_speakers(meeting_stem):
         merged_by_channel[channel_name], _ = merge_same_channel_fragments(raw_clusters)
     results_by_channel = suggest_speakers_for_meeting(merged_by_channel, profiles)
 
+    people_by_id = {person["person_id"]: person for person in profiles}
     channels_out = {}
     # People whose confirmation in this meeting was made against a run that
     # no longer describes anything on screen, keyed by person id so someone
@@ -7330,7 +7518,31 @@ def suggest_speakers(meeting_stem):
             if confirmed_by_user is None:
                 for person in superseded_owners:
                     stale_assignments.setdefault(person["person_id"], person["display_name"])
+            raw = raw_clusters_by_id[sid]
+            try:
+                source, _ = _cluster_recording_source(raw, meeting_stem)
+                if source not in recording_cache:
+                    recording_cache[source] = _find_recording_for_stem(dirs["recordings"], source)
+                can_play = recording_cache[source] is not None
+            except ValueError:
+                can_play = False
+            recognized = people_by_id.get(raw.get("recognized_person_id")) or {}
+            recognized_from_confirmation = any(
+                prototype.get("meeting_id") == meeting_stem
+                and prototype_run_matches(prototype, run_id)
+                and prototype_channel_matches(prototype, channel_name, recording_type)
+                and (prior := raw_clusters_by_id.get(prototype.get("diarization_speaker_id"))) is not None
+                and prior.get("source_recording") != context.source_recording
+                for prototype in recognized.get("prototypes") or []
+            )
             cluster_out[sid] = {
+                "from_continuation": context.source_recording is not None,
+                "recording_available": can_play,
+                "recognized_in_continuation": (
+                    recognized.get("display_name")
+                    if recognized_from_confirmation and not context.contains_multiple_speakers
+                    and not context.review_state else None
+                ),
                 "status": r.status,
                 "suggested_person_id": r.suggested_person_id,
                 "suggested_name": r.suggested_name,
@@ -7405,7 +7617,7 @@ def suggest_speakers(meeting_stem):
         "schema_version": 1,
         "diarization_run_id": run_token,
         "meeting_id": meeting_stem,
-        "recording_available": recording_path is not None,
+        "recording_available": any(path is not None for path in recording_cache.values()),
         # Clusters plus one extra for each cluster marked as mixed. Worth
         # surfacing because the real ceiling is invisible in the output:
         # Sortformer's four-slot architecture returns a five-person channel
@@ -7504,12 +7716,18 @@ def get_speaker_sample_audio(
     resolved_id = id_resolution[diarization_speaker_id]
     context = clusters[resolved_id][1]
 
-    recording_path = _find_recording_file(dirs["recordings"], meeting_stem)
+    raw_clusters_by_id = channel_data.get("clusters") or {}
+    try:
+        source, offset = _cluster_recording_source(raw_clusters_by_id[resolved_id], meeting_stem)
+    except ValueError:
+        print(json.dumps({"success": False, "error": "invalid source recording"}))
+        return
+    recording_path = (_find_recording_for_stem(dirs["recordings"], source) if source != meeting_stem
+                      else _find_recording_file(dirs["recordings"], meeting_stem))
     if recording_path is None:
         print(json.dumps({"success": False, "error": "no source audio available"}))
         return
 
-    raw_clusters_by_id = channel_data.get("clusters") or {}
     pooled_segments = [
         seg
         for fragment_id in [resolved_id, *context.merged_from]
@@ -7532,6 +7750,11 @@ def get_speaker_sample_audio(
             "error": f"No sample {segment_index} for {diarization_speaker_id!r}",
         }))
         return
+
+    if offset:
+        pooled_segments = [_audio_local_range(segment, offset) for segment in pooled_segments]
+        if target is not None:
+            target = _audio_local_range(target, offset)
 
     with tempfile.NamedTemporaryFile(
         prefix="steno-sample-",
@@ -7559,6 +7782,23 @@ def get_speaker_sample_audio(
         }))
     finally:
         output_path.unlink(missing_ok=True)
+
+
+def _cluster_recording_source(cluster, meeting_stem):
+    """Map a cluster's note timeline back to the audio file that produced it."""
+    from src.speaker_schema import validate_meeting_stem
+
+    stem = cluster.get("source_recording")
+    if stem is None:
+        return meeting_stem, 0
+    offset = cluster.get("source_offset")
+    if type(offset) is not int or offset < 0:
+        raise ValueError("Invalid continuation recording offset.")
+    return validate_meeting_stem(stem), offset
+
+
+def _audio_local_range(segment, offset):
+    return {**segment, "start": segment["start"] - offset, "end": segment["end"] - offset}
 
 
 def _find_recording_file(recordings_dir, stem, extension=None):
