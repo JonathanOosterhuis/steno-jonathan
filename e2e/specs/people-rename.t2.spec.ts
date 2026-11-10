@@ -52,4 +52,14 @@ test('fixed titles show participants and can be edited without saving the prefix
   await editor.press('Enter');
   await expect(page.getByRole('heading', { name: 'Person Beta · Revised budget' })).toBeVisible();
   expect(readFileSync(note, 'utf8')).toMatch(/^title: "Revised budget"$/m);
+
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
+  await page.getByText('Person Beta · Revised budget', { exact: true }).click({ button: 'right' });
+  await page.getByRole('menu').getByRole('button', { name: 'Rename' }).click();
+  const renameField = page.locator('input[value="Revised budget"]');
+  await expect(renameField).toBeVisible();
+  await renameField.fill('Final budget');
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Person Beta · Final budget', { exact: true })).toBeVisible();
+  expect(readFileSync(note, 'utf8')).toMatch(/^title: "Final budget"$/m);
 });

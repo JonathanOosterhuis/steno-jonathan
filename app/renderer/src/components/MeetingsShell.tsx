@@ -364,10 +364,11 @@ function ContextMenu({
     };
   }, [onClose]);
 
+  const meetingInfo = meetings.find((m) => m.session_info.summary_file === action.id)?.session_info;
   const currentLabel =
     action.type === 'folder'
       ? (folders.find((f) => f.id === action.id)?.name ?? '')
-      : (meetings.find((m) => m.session_info.summary_file === action.id)?.session_info.name ?? '');
+      : (meetingInfo?.stored_name ?? meetingInfo?.name ?? '');
 
   return (
     <div
