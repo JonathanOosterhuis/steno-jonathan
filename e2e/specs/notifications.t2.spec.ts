@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { test, expect } from '../fixtures/electron';
 import { realUserDataDir, fileSig } from '../fixtures/real-user-data';
 import { readUserConfig } from '../fixtures/user-config';
@@ -89,4 +90,27 @@ test('notifications toggle persists and gates the note-ready / silence / mic-onl
 
   // Keystone: the real user-data dir is byte-for-byte untouched.
   expect(fileSig(realUserDataDir())).toBe(realDirBefore);
+});
+
+
+test('macOS note-ready toast preserves the app switcher mode', async ({ launchApp }) => {
+  test.skip(process.platform !== 'darwin', 'Only macOS has a Dock activation policy');
+  const { app, page } = await launchApp({ releaseHighlightsSeen: true });
+  const pid = app.process().pid;
+  const policy = () => execFileSync('swift', [
+    '-e', `import AppKit; print(NSRunningApplication(processIdentifier: ${pid})?.activationPolicy.rawValue ?? -1)`,
+  ], { encoding: 'utf8' }).trim();
+
+  for (const [mode, expected] of [['regular', '0'], ['accessory', '1']] as const) {
+    await app.evaluate(({ app: electronApp }, nextMode) => electronApp.setActivationPolicy(nextMode), mode);
+    await expect.poll(policy).toBe(expected);
+
+    const [toast, result] = await Promise.all([app.waitForEvent('window'), showNote(page)]);
+    expect(result.shown).toBe(true);
+    await expect(toast.getByText('E2E note', { exact: true })).toBeVisible();
+    await expect.poll(policy).toBe(expected);
+
+    await toast.close();
+    await expect.poll(policy).toBe(expected);
+  }
 });
