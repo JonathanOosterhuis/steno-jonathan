@@ -7448,20 +7448,10 @@ def suggest_speakers(meeting_stem):
 def get_speaker_sample_audio(
     meeting_stem, channel, diarization_speaker_id, segment_index, expected_run_id,
 ):
-    """Extract a short audio clip of one diarized cluster, for the review
-    UI's play button. Picks the cluster's single LONGEST pooled segment
-    (primary + merged fragments) to avoid cross-voice contamination --
-    mirrors pasrom/meeting-transcriber's SpeakerNamingView.swift and uses
-    the exact same time range `suggest-speakers`' `sample_text` quotes, so
-    what a human reads matches what they'd hear.
+    """Play the excerpt quoted on a cluster card, or an explicitly selected excerpt.
 
-    With `--segment-index i`, plays `samples[i]` from the same cluster's
-    `suggest-speakers` output instead -- the two commands derive that list
-    from identically-pooled segments via the shared `sample_segments`, so
-    the clip always matches the excerpt shown next to it. An out-of-range
-    index is an error rather than a silent fall back to the longest turn:
-    hearing the wrong excerpt with no indication is how someone concludes
-    two different speakers sound the same.
+    A card without a playable quote falls back to the longest acoustic segment.
+    An invalid explicit index fails rather than playing a different excerpt.
 
     Always fails gracefully (`{"success": false, "error": ...}`, never a
     non-JSON crash) when there's no source recording left on disk (the
@@ -7479,6 +7469,7 @@ def get_speaker_sample_audio(
         extract_speaker_sample_audio,
         merge_same_channel_fragments,
         read_speakers_sidecar,
+        representative_sample,
     )
 
     dirs = get_data_dirs()
@@ -7525,25 +7516,22 @@ def get_speaker_sample_audio(
         for seg in (raw_clusters_by_id.get(fragment_id, {}).get("segments") or [])
     ]
 
-    # Resolve the index against the SAME list suggest-speakers rendered, so
-    # the clip and the text beside it are the same moment. Built here rather
-    # than inside the extractor because the list depends on the sidecar's
-    # turn manifest, which only this command has loaded.
-    target = None
-    if segment_index is not None:
-        samples = extract_segment_samples(
-            dirs["transcripts"] / f"{meeting_stem}_transcript.txt",
-            pooled_segments,
-            turn_manifest=sidecar.get("transcript_lines"),
-            target_ids={(channel, fid) for fid in [resolved_id, *context.merged_from]},
-        )
-        if not 0 <= segment_index < len(samples):
-            print(json.dumps({
-                "success": False,
-                "error": f"No sample {segment_index} for {diarization_speaker_id!r}",
-            }))
-            return
-        target = {"start": samples[segment_index]["start"], "end": samples[segment_index]["end"]}
+    samples = extract_segment_samples(
+        dirs["transcripts"] / f"{meeting_stem}_transcript.txt",
+        pooled_segments,
+        turn_manifest=sidecar.get("transcript_lines"),
+        target_ids={(channel, fid) for fid in [resolved_id, *context.merged_from]},
+    )
+    if segment_index is None:
+        target = representative_sample(samples)
+    elif 0 <= segment_index < len(samples):
+        target = samples[segment_index]
+    else:
+        print(json.dumps({
+            "success": False,
+            "error": f"No sample {segment_index} for {diarization_speaker_id!r}",
+        }))
+        return
 
     with tempfile.NamedTemporaryFile(
         prefix="steno-sample-",

@@ -527,7 +527,12 @@ class Notification extends EventEmitter {
 
     win.once('ready-to-show', () => {
       win.showInactive();
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      // On macOS the default workspace transition can leave the whole app in
+      // accessory mode after the toast closes, removing Steno from Cmd+Tab.
+      win.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        ...(process.platform === 'darwin' ? { skipTransformProcessType: true } : {}),
+      });
       win.setAlwaysOnTop(true, 'screen-saver', 1);
 
       // Keep the 15s auto-close (matches the pre-existing pre-meeting toast).
@@ -571,6 +576,14 @@ let launchedByShortcut = false;
 // suppress the first window show so Steno starts hidden in the tray/menu bar,
 // and we tag telemetry so background opens don't inflate DAU/funnels.
 let launchedHidden = false;
+// The saved preference is authoritative when macOS opens the window again.
+let hideDockIcon = false;
+
+function restoreDockPresence() {
+  if (!IS_E2E && process.platform === 'darwin' && !hideDockIcon) {
+    app.setActivationPolicy('regular');
+  }
+}
 
 /**
  * The only route through which the main window may be exposed.
@@ -580,6 +593,7 @@ let launchedHidden = false;
 function exposeMainWindow({ focus = true } = {}) {
   if (!mayExposeMainWindow({ isE2EHeadless: IS_E2E_HEADLESS })) return false;
   if (!mainWindow || mainWindow.isDestroyed()) return false;
+  restoreDockPresence();
   if (mainWindow.isMinimized()) mainWindow.restore();
   if (!mainWindow.isVisible()) mainWindow.show();
   if (focus) mainWindow.focus();
@@ -2323,10 +2337,8 @@ if (!gotSingleInstanceLock) {
         });
 
         const dockConfig = JSON.parse(dockResult.trim());
-        if (dockConfig.hide_dock_icon) {
-          app.dock.hide();
-          console.log('Dock icon hidden (menu bar only mode)');
-        }
+        hideDockIcon = dockConfig.hide_dock_icon === true;
+        app.setActivationPolicy(hideDockIcon ? 'accessory' : 'regular');
       } catch (e) {
         console.error('Failed to load dock icon preference:', e.message);
       }
@@ -9259,23 +9271,15 @@ ipcMain.handle('set-dock-icon', async (event, hidden) => {
     sendDebugLog(`Setting hide dock icon to: ${hidden}`);
     const result = await runPythonScript('simple_recorder.py', ['set-dock-icon', hidden ? 'True' : 'False']);
 
-    // Apply immediately
-    if (process.platform === 'darwin' && app.dock) {
-      if (hidden) {
-        app.dock.hide();
-      } else {
-        app.dock.show();
-      }
-    }
-
-    // Extract JSON from output
     const jsonMatch = result.match(/\{.*\}/s);
-    if (jsonMatch) {
-      const jsonData = JSON.parse(jsonMatch[0]);
-      return jsonData;
+    const response = jsonMatch
+      ? JSON.parse(jsonMatch[0])
+      : { success: true, hide_dock_icon: hidden };
+    if (response.success && process.platform === 'darwin') {
+      hideDockIcon = hidden;
+      app.setActivationPolicy(hidden ? 'accessory' : 'regular');
     }
-
-    return { success: true, hide_dock_icon: hidden };
+    return response;
   } catch (error) {
     sendDebugLog(`Error setting dock icon: ${error.message}`);
     return { success: false, error: error.message };

@@ -143,18 +143,19 @@
   [data-theme="dark"] {
     --page: #1A1A18;
     --surface: #1A1A18;
-    --surface-raised: #24241F;
+    --surface-raised: #30302D;
+    --note-avatar-bg: #363631;
     --surface-sunken: #14140F;
-    --surface-hover: #242420;
-    --surface-active: #2E2E28;
+    --surface-hover: #2C2C29;
+    --surface-active: #343430;
     --surface-translucent: rgba(26, 26, 24, 0.78);
 
     --fg-1: #EDEAE0;
-    --fg-2: #9A968A;
-    --fg-muted: #5D5A52;
+    --fg-2: #B7B3A8;
+    --fg-muted: #A39F95;
     --fg-inverse: var(--ink-900);
 
-    --border-subtle: rgba(237, 234, 224, 0.06);
+    --border-subtle: rgba(237, 234, 224, 0.12);
     --border-strong: rgba(237, 234, 224, 0.20);
 
     --primary-hover: #FFFFFF;
@@ -183,7 +184,7 @@
     --secondary: 54 7% 14%;
     --secondary-foreground: 48 20% 90%;
     --muted: 54 7% 14%;
-    --muted-foreground: 48 5% 57%;
+    --muted-foreground: 43 7% 61%;
     --accent: 54 7% 14%;
     --accent-foreground: 48 20% 90%;
     --destructive: 8 51% 60%;
