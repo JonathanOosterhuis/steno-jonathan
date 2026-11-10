@@ -171,6 +171,7 @@ function DetailContent({
   routeSummaryFile: string;
 }) {
   const info = meeting.session_info;
+  const editableName = info.stored_name ?? info.name;
   const hasContinuation = Boolean(info.continuation_ids?.length) ||
     /^--- Resumed \d{2}:\d{2} ---[ \t]*$/m.test(meeting.diarised_text || meeting.transcript || '');
   const summaryFile = info.summary_file;
@@ -1104,7 +1105,7 @@ function DetailContent({
               onBlur={(e) => {
                 const next = (e.currentTarget.textContent ?? '').trim();
                 setIsEditingTitle(false);
-                if (!next || next === info.name) return;
+                if (!next || next === editableName) return;
                 void ipc()
                   .meetings.update(summaryFile, { name: next })
                   .then(() => qc.invalidateQueries({ queryKey: meetingsKeys.all }));
@@ -1115,13 +1116,13 @@ function DetailContent({
                   (e.currentTarget as HTMLSpanElement).blur();
                 } else if (e.key === 'Escape') {
                   e.preventDefault();
-                  if (titleEditRef.current) titleEditRef.current.textContent = info.name;
+                  if (titleEditRef.current) titleEditRef.current.textContent = editableName;
                   setIsEditingTitle(false);
                 }
               }}
               className="outline-none"
             >
-              {info.name}
+              {editableName}
             </span>
           ) : (
             <span className="cursor-text" onClick={() => setIsEditingTitle(true)}>

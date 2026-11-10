@@ -10,8 +10,14 @@ test('includes confirmed participants except the owner', () => {
 test('ignores unidentified speakers and preserves the topic when none remain', () => {
   expect(withParticipantTitle(meeting(['Jonathan', 'Speaker 2', 'Others']), 'Jonathan').session_info.name).toBe('Project planning');
 });
-test('preserves manually edited titles', () => {
-  expect(withParticipantTitle(meeting(['Panos'], 'My own title', 'Project planning'), 'Jonathan').session_info.name).toBe('My own title');
+test('adds participants to fixed and manually edited titles', () => {
+  const fixed = withParticipantTitle(meeting(['Jonathan', 'Benjamin'], 'De Heus proposal', null), 'Jonathan');
+  expect(fixed.session_info.name).toBe('Benjamin · De Heus proposal');
+  expect(fixed.session_info.stored_name).toBe('De Heus proposal');
+  expect(withParticipantTitle(meeting(['Panos'], 'My own title', 'Project planning'), 'Jonathan').session_info.name).toBe('Panos · My own title');
+});
+test('avoids repeating a name that already prefixes a saved title', () => {
+  expect(withParticipantTitle(meeting(['Benjamin'], 'Benjamin · De Heus proposal', null), 'Jonathan').session_info.name).toBe('Benjamin · De Heus proposal');
 });
 test('renamed participants are immediately reflected without editing the base', () => {
   expect(withParticipantTitle(meeting(['Martijn Visscher', 'Martijn Example']), 'Jonathan').session_info.name).toBe('Martijn Visscher, Martijn Example · Project planning');
