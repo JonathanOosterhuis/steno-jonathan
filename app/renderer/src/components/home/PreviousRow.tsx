@@ -64,7 +64,7 @@ export function PreviousRow({ meeting, folderName }: PreviousRowProps) {
         <div
           aria-hidden="true"
           className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg text-[15px] font-medium"
-          style={{ background: 'var(--surface-sunken)', color: 'var(--fg-2)' }}
+          style={{ background: 'var(--note-avatar-bg, var(--surface-sunken))', color: 'var(--fg-2)' }}
         >
           {title.charAt(0).toUpperCase()}
         </div>
