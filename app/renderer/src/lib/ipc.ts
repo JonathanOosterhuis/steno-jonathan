@@ -27,6 +27,8 @@ export type Result<T> = ({ success: true } & T) | {
 export interface SessionInfo {
   auto_title_base?: string | null;
   name: string;
+  /** Original name when the renderer adds participants to the displayed title. */
+  stored_name?: string;
   summary_file: string;
   transcript_file?: string;
   audio_file?: string;

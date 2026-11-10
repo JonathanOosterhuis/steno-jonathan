@@ -32,3 +32,24 @@ test('automatic list and detail titles include participants but omit the owner',
   await page.getByText('Panos, Arash · Project planning', { exact: true }).click();
   await expect(page.getByRole('heading', { name: /Panos, Arash · Project planning/ })).toBeVisible();
 });
+
+test('fixed titles show participants and can be edited without saving the prefix', async ({ launchApp, userDataDir }) => {
+  const { mkdirSync, writeFileSync } = await import('fs');
+  const output = path.join(userDataDir, 'output');
+  mkdirSync(output, { recursive: true });
+  const note = path.join(output, 'fixed-title_summary.md');
+  writeFileSync(note, '---\ntitle: "Budget proposal"\nauto_title_base: null\nnotes_generated: false\n---\n\n## Transcript\nBudget discussion.\n\n## Participants\nJonathan, Person Beta\n');
+  const { page } = await launchApp({ releaseHighlightsSeen: true });
+  await page.evaluate(() => window.stenoai.settings.setUserName('Jonathan'));
+  await page.reload();
+  await page.getByText('Person Beta · Budget proposal', { exact: true }).click();
+  const title = page.getByRole('heading', { name: 'Person Beta · Budget proposal' });
+  await expect(title).toBeVisible();
+  await title.getByText('Person Beta · Budget proposal', { exact: true }).click();
+  const editor = page.locator('h1 [contenteditable="true"]');
+  await expect(editor).toHaveText('Budget proposal');
+  await editor.fill('Revised budget');
+  await editor.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Person Beta · Revised budget' })).toBeVisible();
+  expect(readFileSync(note, 'utf8')).toMatch(/^title: "Revised budget"$/m);
+});
