@@ -28,9 +28,11 @@ export function parseTranscript(text: string, isDiarised: boolean): Segment[] {
   if (sections.length > 1) {
     // One pass can fall back to plain live text while another has speakers.
     // Keep both, including named turns when the first pass was plain text.
+    const mayHaveUntimedSpeakers = isDiarised && /^--- Merged ---[ \t]*$/m.test(text);
     return sections.flatMap((section) => parseTranscript(
       section,
-      /^\[\d+(?::\d{2}){1,2}(?:\.\d+)?\] \[[^\]]+\]/m.test(section),
+      /^\[\d+(?::\d{2}){1,2}(?:\.\d+)?\] \[[^\]]+\]/m.test(section)
+        || (mayHaveUntimedSpeakers && /^\[[^\]\r\n]+\][ \t]+\S/m.test(section)),
     ));
   }
   if (isDiarised) {
