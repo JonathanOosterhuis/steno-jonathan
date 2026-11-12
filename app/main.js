@@ -2002,7 +2002,7 @@ if (!gotSingleInstanceLock) {
     app, ipcMain, dialog, getMainWindow: () => mainWindow, exposeMainWindow,
     getOutputDir, getUserDataDir,
     isBusy: () => currentRecordingProcess !== null || systemAudioRecordingActive || isProcessing || activeReprocessJobs.size > 0,
-    readMeeting: readMeetingForTransfer,
+    readMeeting: readSavedMeetingSnapshot,
     findAudioSource: findMeetingTransferAudio,
     prepareAudio: prepareMeetingTransferAudio,
     makeShareMenu: items => new (require('electron').ShareMenu)(items),
@@ -3071,9 +3071,8 @@ async function validateMeetingFilePath(summaryFile) {
   return { realPath, allowedOutputDirs };
 }
 
-// The transfer exporter reads a stable saved snapshot rather than trusting
-// renderer-supplied meeting content or an arbitrary audio path.
-async function readMeetingForTransfer(summaryFile) {
+// Read a stable saved snapshot rather than trusting renderer-supplied content.
+async function readSavedMeetingSnapshot(summaryFile) {
   const validated = await validateMeetingFilePath(summaryFile);
   if (validated.error) throw { code: 'unsafe_storage' };
   const handle = await fs.promises.open(validated.realPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
@@ -3087,7 +3086,7 @@ async function readMeetingForTransfer(summaryFile) {
     const meeting = validated.realPath.endsWith('.md')
       ? parseMeetingMarkdown(content, validated.realPath) : JSON.parse(content);
     if (!meeting.session_info) throw { code: 'unsafe_storage' };
-    return { realPath: validated.realPath, meeting, fingerprint: require('crypto').createHash('sha256').update(bytes).digest('hex') };
+    return { ...validated, meeting, fingerprint: require('crypto').createHash('sha256').update(bytes).digest('hex') };
   } finally { await handle.close(); }
 }
 
@@ -3119,6 +3118,85 @@ async function prepareMeetingTransferAudio(source) {
   } catch (error) { await cleanup(); throw error; }
 }
 
+async function readSpeakerTitleHints(summaryFile) {
+  const match = /^(.*)_summary\.(?:md|json)$/.exec(path.basename(summaryFile));
+  const sidecar = match && path.join(path.dirname(summaryFile), `${match[1]}_speakers.json`);
+  const hasSpeakerSidecar = Boolean(sidecar && await fs.promises.lstat(sidecar).then(stat => stat.isFile(), () => false));
+  let suggestedParticipants = [];
+  if (hasSpeakerSidecar) {
+    try {
+      const hints = JSON.parse(await runPythonScript('simple_recorder.py', ['speaker-title-names', summaryFile], true));
+      if (Array.isArray(hints)) suggestedParticipants = hints.filter(name => typeof name === 'string');
+    } catch { /* Optional hints must not prevent opening or merging a note. */ }
+  }
+  return { hasSpeakerSidecar, suggestedParticipants };
+}
+
+ipcMain.handle('merge-meetings', async (_event, firstFile, secondFile) => {
+  try {
+    const sources = await Promise.all([firstFile, secondFile].map(readSavedMeetingSnapshot));
+    if (summaryStemKey(sources[0].realPath) === summaryStemKey(sources[1].realPath)) {
+      return { success: false, error: 'Choose two different notes.' };
+    }
+    if (sources.some(({ realPath, allowedOutputDirs }) =>
+      !allowedOutputDirs.includes(path.dirname(realPath) + path.sep)
+      || !/_summary\.(md|json)$/.test(realPath))) {
+      return { success: false, error: 'Choose two saved notes.' };
+    }
+    if (sources.some(({ realPath, meeting }) =>
+      isSummaryBusy(realPath) || meeting.session_info.processing)) {
+      return { success: false, error: 'Wait for both notes to finish processing.' };
+    }
+
+    await Promise.all(sources.map(async ({ realPath, meeting }) => {
+      const { suggestedParticipants } = await readSpeakerTitleHints(realPath);
+      meeting.suggested_participants = suggestedParticipants;
+    }));
+
+    sources.sort((a, b) => a.realPath.localeCompare(b.realPath));
+    const { mergeMeetings } = require('./merge-meetings');
+    const merged = mergeMeetings(sources.map(source => source.meeting));
+    if (!merged) {
+      return { success: false, error: 'Both notes need a transcript before they can be merged.' };
+    }
+    const key = crypto.createHash('sha256').update(JSON.stringify(
+      sources.map(({ realPath, fingerprint, meeting }) => [realPath, fingerprint, meeting.suggested_participants]).sort(),
+    )).digest('hex');
+    const summaryFile = path.join(path.dirname(sources[0].realPath), `merged-${key}_summary.json`);
+    merged.session_info.summary_file = summaryFile;
+    const document = JSON.stringify(merged, null, 2);
+    if (Buffer.byteLength(document) > STORE_DOCUMENT_LIMIT) {
+      return { success: false, error: 'The combined note is too large.' };
+    }
+    if (pendingDeleteBySummary.has(canonicalPathForCompare(summaryFile))) {
+      return { success: false, error: 'The merged note is pending deletion.' };
+    }
+    const staged = summaryFile + '.' + crypto.randomUUID() + '.tmp';
+    const handle = await fs.promises.open(staged, 'wx', 0o600);
+    try {
+      try {
+        await handle.writeFile(document, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      // Check and publish in one main-process turn. A same-directory rename
+      // also works on custom storage without hard-link support.
+      if (pendingDeleteBySummary.has(canonicalPathForCompare(summaryFile))) {
+        return { success: false, error: 'The merged note is pending deletion.' };
+      }
+      const existing = fs.lstatSync(summaryFile, { throwIfNoEntry: false });
+      if (!existing) fs.renameSync(staged, summaryFile);
+      else if (!existing.isFile()) throw new Error('Invalid merged note destination');
+    } finally {
+      await fs.promises.unlink(staged).catch(() => {});
+    }
+    return { success: true, summaryFile };
+  } catch {
+    return { success: false, error: 'Could not create the merged note.' };
+  }
+});
+
 ipcMain.handle('get-meeting', async (_event, summaryFile) => {
   try {
     const validated = await validateMeetingFilePath(summaryFile);
@@ -3127,29 +3205,7 @@ ipcMain.handle('get-meeting', async (_event, summaryFile) => {
     }
     const { realPath: realResolved, allowedOutputDirs } = validated;
     const content = await fs.promises.readFile(realResolved, 'utf-8');
-    const summaryBase = path.basename(realResolved);
-    const summarySuffix = summaryBase.endsWith('_summary.md')
-      ? '_summary.md'
-      : summaryBase.endsWith('_summary.json')
-        ? '_summary.json'
-        : null;
-    let hasSpeakerSidecar = false;
-    if (summarySuffix) {
-      const meetingStem = summaryBase.slice(0, -summarySuffix.length);
-      const speakerSidecarPath = path.join(path.dirname(realResolved), `${meetingStem}_speakers.json`);
-      try {
-        hasSpeakerSidecar = (await fs.promises.lstat(speakerSidecarPath)).isFile();
-      } catch {
-        hasSpeakerSidecar = false;
-      }
-    }
-    let suggestedParticipants = [];
-    if (hasSpeakerSidecar) {
-      try {
-        const hints = JSON.parse(await runPythonScript('simple_recorder.py', ['speaker-title-names', realResolved], true));
-        if (Array.isArray(hints)) suggestedParticipants = hints.filter(name => typeof name === 'string');
-      } catch (_) { /* Optional title hints must not prevent opening a note. */ }
-    }
+    const { hasSpeakerSidecar, suggestedParticipants } = await readSpeakerTitleHints(realResolved);
     if (summaryFile.endsWith('.md')) {
       // Legacy .md meetings are still listed by list-meetings, so their detail
       // pages route through here. Unlike the list payload, the detail page

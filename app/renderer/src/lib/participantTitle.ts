@@ -8,7 +8,7 @@ export function withParticipantTitle(meeting: Meeting, ownName?: string): Meetin
   const existingPrefix = separator < 0 ? [] : info.name.slice(0, separator).split(',').map(normalized);
   const names = [
     ...new Set(
-      [...(meeting.participants ?? []), ...(meeting.suggested_participants ?? [])]
+      [...(meeting.participants ?? []), ...(meeting.suggested_participants ?? []), ...(info.merged_title_participants ?? [])]
         .filter((p): p is string => typeof p === 'string')
         .map((p) => p.trim())
         .filter(

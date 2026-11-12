@@ -24,7 +24,7 @@ const DIARISED_SEGMENT_RE =
   /(?:\[(\d{1,3}:\d{2}(?::\d{2})?(?:\.\d+)?)\]\s*)?\[([^\]]+)\]\s*([\s\S]*?)(?=(?:\[\d{1,3}:\d{2}(?::\d{2})?(?:\.\d+)?\]\s*)?\[[^\]]+\]|$)/g;
 
 export function parseTranscript(text: string, isDiarised: boolean): Segment[] {
-  const sections = text.split(/^--- Resumed \d{2}:\d{2} ---[ \t]*$/m);
+  const sections = text.split(/^--- (?:Resumed \d{2}:\d{2}|Merged) ---[ \t]*$/m);
   if (sections.length > 1) {
     // One pass can fall back to plain live text while another has speakers.
     // Keep both, including named turns when the first pass was plain text.

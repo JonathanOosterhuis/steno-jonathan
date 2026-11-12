@@ -29,6 +29,8 @@ export interface SessionInfo {
   name: string;
   /** Original name when the renderer adds participants to the displayed title. */
   stored_name?: string;
+  /** Display-only speaker hints retained from merged source notes. */
+  merged_title_participants?: string[];
   summary_file: string;
   transcript_file?: string;
   audio_file?: string;
@@ -1226,6 +1228,7 @@ export interface StenoaiBridge {
     list: RequestFn<[], ListMeetingsResponse>;
     get: RequestFn<[summaryFile: string], GetMeetingResponse>;
     update: RequestFn<[summaryFile: string, patch: UpdateMeetingPatch], UpdateMeetingResponse>;
+    merge: RequestFn<[firstFile: string, secondFile: string], Result<{ summaryFile: string }>>;
     revealFolder: RequestFn<[filePath: string], Result<Record<string, never>>>;
     delete: RequestFn<[meeting: Meeting], DeleteMeetingResponse>;
     undoDelete: RequestFn<[id: string], Result<{ meeting: Meeting }>>;

@@ -21,7 +21,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useMeetings, useDeleteMeeting, useUpdateMeeting } from '@/hooks/useMeetings';
+import { LIVE_SUMMARY_PREFIX, useMeetings, useDeleteMeeting, useUpdateMeeting } from '@/hooks/useMeetings';
 import {
   useAddMeetingToFolder,
   useCreateFolder,
@@ -34,6 +34,8 @@ import { useRecording } from '@/hooks/useRecording';
 import { navigate, useRoute } from '@/lib/router';
 import type { Meeting } from '@/lib/ipc';
 import { UI_LOCALE } from '@/lib/locale';
+import { t } from '@/i18n';
+import { MergeNotesDialog } from '@/components/MergeNotesDialog';
 
 interface MeetingsShellProps {
   activeSummaryFile: string | null;
@@ -86,6 +88,10 @@ export function MeetingsShell({
     { type: 'folder' | 'meeting'; id: string; current: string; itemRect: DOMRectReadOnly } | null
   >(null);
   const [context, setContext] = React.useState<SidebarContextAction | null>(null);
+  const [mergeSource, setMergeSource] = React.useState<string | null>(null);
+  const mergeCandidates = (meetings.data ?? []).filter(({ session_info, is_processing, is_recording }) =>
+    !is_processing && !is_recording && !session_info.processing && !session_info.transcription_failed
+      && !session_info.summary_file.startsWith(LIVE_SUMMARY_PREFIX));
   // Folders only: deleting a folder is NOT undoable, so it keeps a confirm step.
   // Notes delete straight away and are caught by the Undo toast instead (#234).
   const [deleteTarget, setDeleteTarget] = React.useState<{
@@ -249,8 +255,23 @@ export function MeetingsShell({
           onClose={() => setContext(null)}
           onRename={(label) => openRename(context.type, context.id, label, context.itemRect)}
           onDelete={onDeleteAction}
+          onMerge={context.type === 'meeting' && mergeCandidates.length > 1
+            && mergeCandidates.some(m => m.session_info.summary_file === context.id)
+            ? () => {
+                setMergeSource(context.id);
+                setContext(null);
+              }
+            : undefined}
           folders={folders.data ?? []}
           meetings={meetings.data ?? []}
+        />
+      )}
+
+      {mergeSource && (
+        <MergeNotesDialog
+          source={mergeSource}
+          meetings={mergeCandidates}
+          onClose={() => setMergeSource(null)}
         />
       )}
 
@@ -336,6 +357,7 @@ interface ContextMenuProps {
   onClose: () => void;
   onRename: (currentLabel: string) => void;
   onDelete: () => void;
+  onMerge?: () => void;
   folders: Array<{ id: string; name: string }>;
   meetings: Meeting[];
 }
@@ -345,6 +367,7 @@ function ContextMenu({
   onClose,
   onRename,
   onDelete,
+  onMerge,
   folders,
   meetings,
 }: ContextMenuProps) {
@@ -384,6 +407,15 @@ function ContextMenu({
       >
         Rename
       </button>
+      {onMerge && (
+        <button
+          type="button"
+          className="flex w-full items-center rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+          onClick={onMerge}
+        >
+          {t('meeting.merge.action')}
+        </button>
+      )}
       <button
         type="button"
         className="flex w-full items-center rounded px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
