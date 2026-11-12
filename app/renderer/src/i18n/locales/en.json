@@ -1,4 +1,12 @@
 {
+  "meeting.merge.action": "Merge with another note",
+  "meeting.merge.title": "Merge notes",
+  "meeting.merge.description": "Create a new note with both transcripts and notes. The original notes and any saved recordings stay in your library.",
+  "meeting.merge.choose": "Other note",
+  "meeting.merge.placeholder": "Select a note",
+  "meeting.merge.create": "Create merged note",
+  "meeting.merge.cancel": "Cancel",
+  "meeting.merge.error": "Could not create the merged note.",
   "transcript.detectedLanguage": "Detected language",
   "transcript.reportedLanguage": "Reported language",
   "transcript.languageSetting": "Language setting",

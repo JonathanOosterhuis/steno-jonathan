@@ -82,3 +82,25 @@ test('keeps plain and named turns from different passes of a resumed note', () =
     { speaker: 'Alice', text: 'Second pass.', timestamp: '00:01' },
   ]);
 });
+
+
+test('keeps named turns and plain text when two saved notes are merged', () => {
+  expect(parseTranscript(
+    '[00:03] [Person Alpha] Opening statement.\n\n--- Merged ---\n\nPlain transcript from the second note.',
+    true,
+  )).toEqual([
+    { speaker: 'Person Alpha', text: 'Opening statement.', timestamp: '00:03' },
+    { speaker: null, text: 'Plain transcript from the second note.' },
+  ]);
+});
+
+
+test('keeps untimed speaker turns in a merged transcript', () => {
+  expect(parseTranscript(
+    '[Jettie] Opening statement.\n\n--- Merged ---\n\nPlain transcript from the second note.',
+    true,
+  )).toEqual([
+    { speaker: 'Jettie', text: 'Opening statement.', timestamp: undefined },
+    { speaker: null, text: 'Plain transcript from the second note.' },
+  ]);
+});

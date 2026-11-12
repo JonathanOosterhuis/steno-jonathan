@@ -177,6 +177,7 @@ const stenoai = {
     list: () => invoke('list-meetings'),
     get: (summaryFile) => invoke('get-meeting', summaryFile),
     update: (summaryFile, patch) => invoke('update-meeting', summaryFile, patch),
+    merge: (firstFile, secondFile) => invoke('merge-meetings', firstFile, secondFile),
     revealFolder: (filePath) => invoke('reveal-meeting-folder', filePath),
     delete: (meeting) => invoke('delete-meeting', meeting),
     undoDelete: (id) => invoke('undo-delete-meeting', id),
