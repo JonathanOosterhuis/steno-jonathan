@@ -1,3 +1,4 @@
+import { WordCorrections } from '@/components/WordCorrections';
 import { ScreenSnapshotsControl } from '@/components/ScreenSnapshotsControl';
 import { t } from '@/i18n';
 import * as React from 'react';
@@ -248,6 +249,7 @@ export function GeneralTab() {
   return (
     <section data-settings-tab="general">
       <ScreenSnapshotsControl />
+      <WordCorrections />
       <SettingRow
         label="Your name"
         description="First name only — used for in-app greetings. Stored locally."

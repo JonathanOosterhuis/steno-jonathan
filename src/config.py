@@ -2736,6 +2736,18 @@ class Config:
         self._config["cloud_model"] = model.strip()
         return self._save()
 
+    def get_word_corrections(self):
+        from .word_corrections import validate_rules
+        try:
+            return validate_rules(self._config.get("word_corrections", []))
+        except ValueError:
+            return []
+
+    def set_word_corrections(self, rules):
+        from .word_corrections import validate_rules
+        self._config["word_corrections"] = validate_rules(rules)
+        return self._save()
+
     def get_user_name(self) -> str:
         """Get the user's first name (for greetings). Empty string when unset."""
         value = self._config.get("user_name")

@@ -175,5 +175,14 @@
   "snapshots.unavailable": "This snapshot is missing or cannot be read.",
   "snapshots.saved": "Saved {{count}} image(s).",
   "snapshots.saveFailed": "Could not save snapshots. Check that the images and destination are available, then try again.",
-  "snapshots.previewHelp": "Original snapshot from this recording."
+  "snapshots.previewHelp": "Original snapshot from this recording.",
+  "words.title": "Word corrections",
+  "words.description": "Remember names across recordings. Replace whole words, ignoring case, in the final transcript before generating notes. Applies to new transcriptions and re-transcriptions.",
+  "words.original": "Recognized name",
+  "words.replacement": "Correct name",
+  "words.remove": "Remove",
+  "words.add": "Add correction",
+  "words.save": "Save corrections",
+  "words.saved": "Corrections saved",
+  "words.loadError": "Could not load word corrections."
 }

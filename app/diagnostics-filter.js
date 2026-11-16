@@ -69,6 +69,7 @@ const ARGS_ECHO_REDACTORS = {
   // Single sensitive value arg(s): name, storage path, folder name, or URL
   // (URLs may embed user:pass@ or an org hostname).
   'set-user-name': redactRest,
+  'set-word-corrections': redactRest,
   'set-storage-path': redactRest,
   'create-folder': redactRest,
   'rename-folder': redactRest,

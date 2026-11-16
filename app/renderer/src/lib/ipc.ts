@@ -1463,6 +1463,8 @@ export interface StenoaiBridge {
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
     getMicrophone: RequestFn<[], GetMicrophoneResponse>;
     setMicrophone: RequestFn<[deviceId: string, label: string], GetMicrophoneResponse>;
+    getWordCorrections: RequestFn<[], Result<{ rules: Array<{ original: string; replacement: string }> }>>;
+    setWordCorrections: RequestFn<[rules: Array<{ original: string; replacement: string }>], Result<Record<string, never>>>;
     getUserName: RequestFn<[], GetUserNameResponse>;
     setUserName: RequestFn<[name: string], Result<Record<string, never>>>;
     getStoragePath: RequestFn<[], StoragePathResponse>;
