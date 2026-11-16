@@ -43,6 +43,7 @@ const CHANNELS = [
   'get-language', 'set-language',
   'get-microphone', 'set-microphone',
   'get-user-name', 'set-user-name',
+  'get-word-corrections', 'set-word-corrections',
 ];
 
 test('registers exactly the 21 settings-toggle handlers', () => {

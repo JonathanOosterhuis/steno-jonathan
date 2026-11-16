@@ -743,6 +743,11 @@ Summary output language: {config.get_language_name(output_language)}
             speaker_clusters = transcript_result.get("speaker_clusters") or {}
             turn_manifest = transcript_result.get("turn_manifest") or []
 
+        from src.word_corrections import correct_transcript
+        rules = config.get_word_corrections()
+        transcript_text = correct_transcript(transcript_text, rules)
+        diarised_text = correct_transcript(diarised_text, rules, diarised=True)
+
         # Convert the transcript to the selected Chinese script (no-op otherwise).
         transcript_text = _apply_chinese_variant(transcript_text)
         diarised_text = _apply_chinese_variant(diarised_text)
@@ -1543,6 +1548,9 @@ def process_streaming(audio_file, name, notes, live_transcript, append_to):
         )
         is_live_transcript = False
         if reason and live_transcript_text and live_transcript_text.strip():
+            from src.word_corrections import correct_transcript
+            from src.config import get_config
+            live_transcript_text = correct_transcript(live_transcript_text, get_config().get_word_corrections(), diarised=True)
             logger.warning(
                 "Batch transcription %s; falling back to the live transcript "
                 "captured during recording (%d chars)",
@@ -9513,6 +9521,23 @@ def set_microphone_cmd(device_id, label):
         print(json.dumps({"success": True, **result}))
     else:
         print(json.dumps({"success": False, "error": "Failed to save microphone setting"}))
+
+
+@cli.command(name='get-word-corrections')
+def get_word_corrections_cmd():
+    from src.config import get_config
+    print(json.dumps({"success": True, "rules": get_config().get_word_corrections()}))
+
+
+@cli.command(name='set-word-corrections')
+@click.argument('rules_json')
+def set_word_corrections_cmd(rules_json):
+    from src.config import get_config
+    try:
+        success = get_config().set_word_corrections(json.loads(rules_json))
+        print(json.dumps({"success": success, "error": None if success else "Could not save corrections."}))
+    except (ValueError, TypeError):
+        print(json.dumps({"success": False, "error": "Use unique original names and non-empty replacements (max 120 characters, no brackets or line breaks)."}))
 
 
 @cli.command(name='get-user-name')

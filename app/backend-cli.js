@@ -164,7 +164,7 @@ function createBackendCli({
       process.stdout.on('data', (data) => {
         const output = data.toString();
         stdout += output;
-        console.log('Python stdout:', output);
+        if (args[0] !== 'get-word-corrections') console.log('Python stdout:', output);
         // Stream stdout to debug panel in real-time (unless silent), but only the
         // structural diagnostic markers — query answers and other content are
         // dropped so they never reach the shareable buffer.

@@ -88,7 +88,7 @@ class PartialCoverageStreamingTests(unittest.TestCase):
             audio = root / "meeting.wav"
             audio.write_bytes(b"synthetic audio fixture")
             live = root / "live.txt"
-            live_text = "We reviewed the budget and agreed to deploy tomorrow."
+            live_text = "We reviewed the Northwyn budget and agreed to deploy tomorrow."
             live.write_text(live_text, encoding="utf-8")
             model = mock.Mock()
             model.recognize.side_effect = [
@@ -106,6 +106,7 @@ class PartialCoverageStreamingTests(unittest.TestCase):
             recorder.transcriber = mock.Mock()
             recorder.transcriber.transcribe_diarised.return_value = batch
             config = mock.Mock()
+            config.get_word_corrections.return_value = [{"original": "Northwyn", "replacement": "Northwind"}]
             config.get_language.return_value = "en"
             config.get_auto_summarize_enabled.return_value = False
             config.get_keep_recordings.return_value = False
@@ -128,8 +129,8 @@ class PartialCoverageStreamingTests(unittest.TestCase):
             self.assertIn("TRANSCRIPTION_SOURCE:live", result.output)
             self.assertNotIn("TRANSCRIPTION_SOURCE:batch", result.output)
             self.assertIn("is_live_transcript: true", summary)
-            self.assertIn(live_text, summary)
-            self.assertIn(live_text, transcript)
+            self.assertIn(live_text.replace("Northwyn", "Northwind"), summary)
+            self.assertIn(live_text.replace("Northwyn", "Northwind"), transcript)
             self.assertNotIn("Tomorrow.", transcript)
             self.assertEqual(audio.read_bytes(), b"synthetic audio fixture")
 

@@ -231,6 +231,21 @@ function registerSettingsIpc({ ipcMain, runPythonScript, sendDebugLog }) {
     }
   });
 
+  ipcMain.handle('get-word-corrections', async () => {
+    try {
+      return JSON.parse(await runPythonScript('simple_recorder.py', ['get-word-corrections'], true));
+    } catch { return { success: false, error: 'Could not load word corrections.' }; }
+  });
+  ipcMain.handle('set-word-corrections', async (_event, rules) => {
+    try {
+      const serialized = JSON.stringify(rules);
+      if (!Array.isArray(rules) || rules.length > 200 || Buffer.byteLength(serialized, 'utf8') > 16000) {
+        return { success: false, error: 'Use at most 200 corrections and 16 KB of text.' };
+      }
+      return JSON.parse(await runPythonScript('simple_recorder.py', ['set-word-corrections', serialized], true));
+    } catch { return { success: false, error: 'Could not save word corrections.' }; }
+  });
+
   ipcMain.handle('get-user-name', async () => {
     try {
       const result = await runPythonScript('simple_recorder.py', ['get-user-name'], true);
