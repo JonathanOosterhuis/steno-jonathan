@@ -1,3 +1,4 @@
+import { DiscardRecordingButton } from '@/components/DiscardRecordingButton';
 import * as React from 'react';
 import { Check, ChevronDown, Copy, Languages, Play, Search as SearchIcon, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
@@ -242,6 +243,7 @@ export function LiveTranscriptBar() {
                 <Play size={14} />
               </button>
             )}
+            <DiscardRecordingButton recording={recording} />
             <button
               type="button"
               onClick={onStop}

@@ -407,6 +407,7 @@ export type PauseRecordingResponse = Result<{ message: string }>;
 export type ResumeRecordingResponse = Result<{ message: string }>;
 
 export interface QueueStatus {
+  pendingDiscardId?: string | null;
   recordingId?: string | null;
   chatSummaryFile?: string | null;
   success: true;
@@ -1167,6 +1168,8 @@ export interface StenoaiBridge {
       StartRecordingResponse
     >;
     stop: RequestFn<[], StopRecordingResponse>;
+    discardClosed: SendFn<[id: string]>;
+    discard: RequestFn<[recordingId: string], StopRecordingResponse>;
     /** Language for the meeting being recorded, saved to its note on Stop. */
     getLanguage: RequestFn<[], Result<{ language: string }>>;
     setLanguage: RequestFn<[code: string], Result<Record<string, never>>>;
@@ -1192,7 +1195,7 @@ export interface StenoaiBridge {
      *  processable file instead of losing the whole recording. */
     openSystemAudioFile: RequestFn<[name: string], Result<{ filePath: string }>>;
     appendSystemAudioChunk: RequestFn<[bytes: Uint8Array], Result<Record<string, never>>>;
-    closeSystemAudioFile: RequestFn<[], Result<{ filePath: string }>>;
+    closeSystemAudioFile: RequestFn<[expectedFile?: string], Result<{ filePath?: string }>>;
     /** Linux-only: starts a pw-record subprocess in main capturing the default
      *  sink's monitor (see app/linux-loopback.js). PCM arrives via
      *  on.linuxLoopbackChunk, not through getDisplayMedia. */
@@ -1246,7 +1249,7 @@ export interface StenoaiBridge {
     recordingAvailable: RequestFn<[summaryFile: string], Result<{ available: boolean }>>;
     /** The custom Obsidian sync's view of this note; null when not installed. */
     vaultSyncStatus: RequestFn<[summaryFile: string], Result<{ sync: VaultSyncStatus | null }>>;
-    saveNotes: RequestFn<[name: string, notes: string], SaveMeetingNotesResponse>;
+    saveNotes: RequestFn<[name: string, notes: string, recordingId?: string], SaveMeetingNotesResponse>;
     exportTranscript: RequestFn<
       [defaultFilename: string, content: string],
       Result<{ path: string }>

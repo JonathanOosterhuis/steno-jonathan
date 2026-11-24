@@ -124,6 +124,8 @@ const stenoai = {
     start: (name, trigger, appendTo) =>
       invoke('start-recording-ui', name, trigger, appendTo),
     stop: () => invoke('stop-recording-ui'),
+    discardClosed: (id) => send('discard-capture-closed', id),
+    discard: (recordingId) => invoke('discard-recording-ui', recordingId),
     getLanguage: () => invoke('get-recording-language'),
     setLanguage: (code) => invoke('set-recording-language', code),
     pause: () => invoke('pause-recording-ui'),
@@ -134,7 +136,7 @@ const stenoai = {
     getSystemAudioSupport: () => invoke('get-system-audio-support'),
     openSystemAudioFile: (name) => invoke('open-system-audio-file', name),
     appendSystemAudioChunk: (bytes) => invoke('append-system-audio-chunk', bytes),
-    closeSystemAudioFile: () => invoke('close-system-audio-file'),
+    closeSystemAudioFile: (expectedFile) => invoke('close-system-audio-file', expectedFile),
     // Linux-only loopback path (see app/linux-loopback.js) — starts a
     // pw-record subprocess in main and streams PCM back via
     // on.linuxLoopbackChunk instead of going through getDisplayMedia.
@@ -190,7 +192,7 @@ const stenoai = {
     recordingAvailable: (summaryFile) => invoke('recording-available', summaryFile),
     vaultSyncStatus: (summaryFile) => invoke('vault-sync-status', summaryFile),
     regenTitle: (summaryFile, name) => invoke('regen-meeting-title', summaryFile, name),
-    saveNotes: (name, notes) => invoke('save-meeting-notes', name, notes),
+    saveNotes: (name, notes, recordingId) => invoke('save-meeting-notes', name, notes, recordingId),
     generateReport: (summaryFile, templateId) => invoke('generate-report-meeting', summaryFile, templateId),
     setActiveReport: (summaryFile, reportId) => invoke('set-active-report', summaryFile, reportId),
     deleteReport: (summaryFile, reportId) => invoke('delete-report', summaryFile, reportId),
