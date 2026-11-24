@@ -322,8 +322,8 @@ export function useGenerateReport() {
 
 export function useSaveMeetingNotes() {
   return useMutation({
-    mutationFn: async (args: { name: string; notes: string }) =>
-      unwrap(await ipc().meetings.saveNotes(args.name, args.notes)),
+    mutationFn: async (args: { name: string; notes: string; recordingId?: string }) =>
+      unwrap(await ipc().meetings.saveNotes(args.name, args.notes, args.recordingId)),
   });
 }
 

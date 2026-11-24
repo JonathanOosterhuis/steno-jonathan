@@ -57,7 +57,7 @@ const CAPTURE_CHECK_SAMPLE_MS = 100;
  * subprocess fallback — capture always happens here, on every platform.
  */
 export function useSystemAudioCapture() {
-  const { status, sessionName } = useRecording();
+  const { status, sessionName, pendingDiscardId } = useRecording();
   const systemAudio = useSystemAudioSetting();
   const systemAudioSupport = useSystemAudioSupport();
   const engineQuery = useTranscriptionEngine();
@@ -125,11 +125,13 @@ export function useSystemAudioCapture() {
   // sysStreamRef holds the resulting MediaStream either way, same as mac/
   // Windows; this ref exists only for the extra teardown step Linux needs.
   const linuxLoopbackRef = React.useRef<LinuxLoopbackStream | null>(null);
+  const linuxReleaseRef = React.useRef<Promise<void> | null>(null);
+  const acquiringLinuxRef = React.useRef(false);
   const stopLinuxLoopback = () => {
     if (!linuxLoopbackRef.current) return;
     const handle = linuxLoopbackRef.current;
     linuxLoopbackRef.current = null;
-    void handle.stop();
+    linuxReleaseRef.current = handle.stop().catch(() => {});
   };
   // Serialises the incremental writes: each MediaRecorder timeslice is
   // appended to the open on-disk file through this chain so chunks land in
@@ -141,6 +143,8 @@ export function useSystemAudioCapture() {
   // file is actually truncated.
   const appendFailedRef = React.useRef(false);
   const sessionNameRef = React.useRef<string | null>(null);
+  const startingRef = React.useRef<Promise<void> | null>(null);
+  const stoppingRef = React.useRef<Promise<void> | null>(null);
   const activeRef = React.useRef(false);
   // Bumped by stopCapture so any in-flight startCapture awaiting
   // getUserMedia/getDisplayMedia knows it's been cancelled and aborts
@@ -275,6 +279,7 @@ export function useSystemAudioCapture() {
             },
           });
         } catch (micErr) {
+          if (cancelled()) { stopAcquired(); return; }
           // Only fall back to the system default when the pinned device
           // itself is the problem — genuinely gone (OverconstrainedError: the
           // exact deviceId constraint couldn't be satisfied) or removed from
@@ -327,6 +332,7 @@ export function useSystemAudioCapture() {
           }
           if (isLinux) {
             // Bypasses getDisplayMedia — see lib/linuxLoopbackStream.ts.
+            acquiringLinuxRef.current = true;
             const linuxLoopback = await startLinuxLoopbackStream({
               // pw-record died mid-recording: the track is already closed, so
               // the mix continues mic-only. NOT reportCaptureError — that
@@ -340,7 +346,7 @@ export function useSystemAudioCapture() {
               },
             });
             if (cancelled()) {
-              void linuxLoopback.stop();
+              await linuxLoopback.stop();
               stopAcquired();
               return;
             }
@@ -373,6 +379,7 @@ export function useSystemAudioCapture() {
           }
           sysStreamRef.current = sysStream;
         } catch (loopbackErr) {
+          if (cancelled()) { stopAcquired(); return; }
           // Intentionally-disabled loopback (toggle off) is the expected
           // mic-only case — don't log it as a failure; only a genuine
           // unavailability warrants a warning.
@@ -421,6 +428,8 @@ export function useSystemAudioCapture() {
             }
           }
         }
+
+        if (cancelled()) { stopAcquired(); return; }
 
         // 3. Build the stereo graph. AudioContext at 48 kHz matches the
         //    native loopback rate so no resampling. We route mic to
@@ -561,7 +570,7 @@ export function useSystemAudioCapture() {
           // Cancelled after the file opened — close it so the main-side write
           // stream isn't leaked (it'd otherwise linger until the next open).
           stopAcquired();
-          if (opened.success) void bridge.recording.closeSystemAudioFile();
+          if (opened.success) void bridge.recording.closeSystemAudioFile(opened.filePath);
           return;
         }
         if (!opened.success) {
@@ -1003,19 +1012,29 @@ export function useSystemAudioCapture() {
     // is off/unsupported). The system-audio toggle no longer starts or stops
     // capture; it only affects whether loopback is mixed in on the NEXT start
     // (read via loopbackEnabledRef inside startCapture).
-    if (status === 'recording' && !activeRef.current) {
-      void startCapture();
+    if (pendingDiscardId) {
+      // Acknowledge even when discard arrived before getUserMedia resolved.
+      // startToken invalidates that request before main accepts another session.
+      stoppingRef.current ??= stopCapture();
+      // The Linux loopback subprocess is shared. Finish any outstanding
+      // acquisition and release before letting the next recording start it.
+      void Promise.all([stoppingRef.current, acquiringLinuxRef.current ? startingRef.current : null])
+        .then(() => linuxReleaseRef.current)
+        .then(() => bridge.recording.discardClosed(pendingDiscardId));
+    } else if (status === 'recording' && !activeRef.current) {
+      stoppingRef.current = null;
+      startingRef.current = startCapture().finally(() => { acquiringLinuxRef.current = false; });
     } else if (status === 'paused' && recorderRef.current?.state === 'recording') {
       recorderRef.current.pause();
     } else if (status === 'recording' && recorderRef.current?.state === 'paused') {
       recorderRef.current.resume();
     } else if ((status === 'idle' || status === 'processing') && activeRef.current) {
-      void stopCapture();
+      stoppingRef.current = stopCapture();
     }
     // qc (useQueryClient()) is referentially stable for the app's lifetime
     // (the same QueryClient instance from the root Provider) — listing it
     // here doesn't cause extra effect re-runs, it just satisfies the rule.
-  }, [status, qc]);
+  }, [status, qc, pendingDiscardId]);
 
   // Unmount-only safety net (empty deps = no cleanup on dep changes). Runs
   // when the App tree unmounts (e.g. window close, page reload, StrictMode

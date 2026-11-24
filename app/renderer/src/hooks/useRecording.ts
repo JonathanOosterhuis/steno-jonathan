@@ -170,6 +170,7 @@ export function useRecording() {
         // Reflect the resume/continue target immediately so a detail view's
         // "recording this note" gate flips on click, not a poll later. The
         // next queue poll reconciles it (null for a fresh new-note start).
+        pendingDiscardId: priorQueue?.pendingDiscardId,
         recordingSummaryFile: appendTo ?? null,
       });
       // No navigation: recording coexists with the app. PrimaryDock keys off
@@ -289,6 +290,7 @@ export function useRecording() {
      *  INTO — lets a detail view match by identity rather than the collidable
      *  display name. Null for a fresh new-note recording or when idle. */
     recordingSummaryFile: queue.data?.recordingSummaryFile ?? null,
+    pendingDiscardId: queue.data?.pendingDiscardId ?? null,
     recordingId: queue.data?.recordingId ?? null,
     chatSummaryFile: queue.data?.chatSummaryFile ?? null,
     /** The real note file the live recording/processing session produces.

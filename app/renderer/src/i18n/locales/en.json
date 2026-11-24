@@ -1,4 +1,9 @@
 {
+  "recording.discard": "Discard recording",
+  "recording.discardTitle": "Discard this recording?",
+  "recording.discardNew": "Delete the audio, snapshots and draft from this recording?",
+  "recording.discardContinuation": "Delete the part recorded since Resume? The earlier note and recording will be kept.",
+  "recording.keep": "Keep recording",
   "meeting.merge.action": "Merge with another note",
   "meeting.merge.title": "Merge notes",
   "meeting.merge.description": "Create a new note with both transcripts and notes. The original notes and any saved recordings stay in your library.",

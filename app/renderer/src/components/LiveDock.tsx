@@ -1,3 +1,4 @@
+import { DiscardRecordingButton } from '@/components/DiscardRecordingButton';
 import * as React from 'react';
 import { ChevronUp, Play, Square } from 'lucide-react';
 import { AudioWave } from '@/components/AudioWave';
@@ -144,6 +145,7 @@ export function LiveDock() {
           <TooltipContent side="top">{transcriptOpen ? 'Hide transcript' : 'Show transcript'}</TooltipContent>
         </Tooltip>
       )}
+      <DiscardRecordingButton recording={recording} />
       <Tooltip>
         <TooltipTrigger asChild>
           <button

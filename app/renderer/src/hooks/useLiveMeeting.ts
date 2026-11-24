@@ -33,10 +33,10 @@ export function useLiveMeeting() {
       setNotesStore(sessionName, next);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        saveNotes.mutate({ name: sessionName, notes: next });
+        saveNotes.mutate({ name: sessionName, notes: next, recordingId: recording.recordingId ?? undefined });
       }, 500);
     },
-    [sessionName, setNotesStore, saveNotes],
+    [sessionName, setNotesStore, saveNotes, recording.recordingId],
   );
 
   React.useEffect(() => {

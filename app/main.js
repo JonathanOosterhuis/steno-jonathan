@@ -4251,7 +4251,7 @@ ipcMain.handle('load-chat-sessions', async () => {
   return { success: true, data: null };
 });
 
-ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
+ipcMain.handle('save-meeting-notes', async (event, sessionName, notes, recordingId) => {
   try {
     // Write into the user-data output dir — the SAME dir Python's get_data_dirs()
     // uses (custom storage if set, else getUserDataDir(), which honors
@@ -4262,6 +4262,12 @@ ipcMain.handle('save-meeting-notes', async (event, sessionName, notes) => {
     const outputDir = getOutputDir();
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
     const notesFile = userNotesFilePath(outputDir, sessionName);
+    if (discardedSessionName === sessionName || (recordingId && recordingId !== String(recordingRuntimeState.startedAtMs))) {
+      return { success: true, path: notesFile };
+    }
+    if (currentRecordingAppendTarget && currentRecordingSessionName === sessionName && originalAppendDraft === undefined) {
+      originalAppendDraft = fs.existsSync(notesFile) ? fs.readFileSync(notesFile) : null;
+    }
     fs.writeFileSync(notesFile, notes, 'utf-8');
     if (activeSysAudioFilePath && sessionName === currentRecordingSessionName) {
       const snapshot = saveRecoverySnapshot(activeSysAudioFilePath, 'notes', notes);
@@ -5073,6 +5079,7 @@ ipcMain.handle('get-queue-status', async () => {
           ? Math.floor((Date.now() - currentProcessingStartedAtMs) / 1000)
           : 0),
     sessionName: currentRecordingSessionName,
+    pendingDiscardId,
     recordingId: systemAudioRecordingActive && recordingRuntimeState.startedAtMs
       ? String(recordingRuntimeState.startedAtMs) : null,
     chatSummaryFile: systemAudioRecordingActive
@@ -5345,6 +5352,7 @@ function spawnLiveTranscribe(sessionName) {
 // so the legacy `record --live` path and this sidecar path stay in lock
 // step if we ever extend the protocol.
 function handleLiveTranscribeLine(line) {
+  if (discardedSessionName !== null) return;
   const sessionName = liveTranscribeSessionName;
   if (line.startsWith('LIVE_READY:')) {
     if (parakeetLoadStartedAt) {
@@ -6563,6 +6571,11 @@ require('./recording-recovery-ipc').registerRecordingRecovery({
 // the segment's transcript is folded into that note instead of creating a
 // new one.
 let currentRecordingAppendTarget = null;
+let discardedSessionName = null;
+let pendingDiscardId = null;
+let recordingCaptureFiles = null;
+let discardCleanupPending = false;
+let originalAppendDraft;
 
 // Valid recording_started `trigger` values. Whitelisted so a stale/forged
 // renderer arg can't smuggle an arbitrary string into PostHog.
@@ -6644,6 +6657,9 @@ ipcMain.handle('set-note-language', async (_event, summaryFile, code) => {
 
 ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) => {
   try {
+    if (pendingDiscardId || discardCleanupPending) {
+      return { success: false, error: 'The previous capture is still closing.' };
+    }
     if (currentRecordingProcess) {
       return { success: false, error: 'Recording already in progress' };
     }
@@ -6672,6 +6688,9 @@ ipcMain.handle('start-recording-ui', async (_, sessionName, trigger, appendTo) =
       }
     }
 
+    discardedSessionName = null;
+    recordingCaptureFiles = null;
+    originalAppendDraft = undefined;
     const actualSessionName = sessionName || 'Note';
     // Clear any stale name-keyed draft notes before this recording starts, so a
     // PREVIOUS recording that was abandoned (never processed → never
@@ -6900,6 +6919,65 @@ ipcMain.handle('resume-recording-ui', async () => {
     console.error('Resume recording UI error:', error.message);
     sendDebugLog(`Resume error: ${error.message}`);
     return { success: false, error: error.message };
+  }
+});
+
+ipcMain.on('discard-capture-closed', (_event, recordingId) => {
+  if (recordingId === pendingDiscardId) pendingDiscardId = null;
+});
+
+ipcMain.handle('discard-recording-ui', async (_event, recordingId) => {
+  if (!systemAudioRecordingActive || recordingId !== String(recordingRuntimeState.startedAtMs)) {
+    return { success: false, error: 'This recording is no longer active.' };
+  }
+  const name = currentRecordingSessionName;
+  const appendTo = currentRecordingAppendTarget;
+  discardedSessionName = name;
+  discardCleanupPending = true;
+  pendingDiscardId = recordingId;
+  clearAutoStartedSession();
+  speakerModelWarmup.cancelScheduled();
+  pausedBySleep = false;
+  closeSleepPausedNotification();
+  stopLiveTranscribe();
+  liveTranscriptState.segments = [];
+  liveTranscriptState.sessionName = null;
+  systemAudioRecordingActive = false;
+  currentRecordingAppendTarget = null;
+  currentRecordingSessionName = null;
+  resetRecordingRuntimeState();
+  applyRecordingBackgroundThrottling();
+  updateTrayIcon(false);
+  try {
+    if (recordingCaptureFiles) {
+      const { stream, filePath, snapshots } = recordingCaptureFiles;
+      activeSysAudioWriteStream = null;
+      activeSysAudioFilePath = null;
+      activeSysAudioSnapshots = null;
+      activeSysAudioBytesWritten = 0;
+      if (!stream.closed) {
+        await new Promise(resolve => {
+          stream.once('close', resolve);
+          stream.end();
+        });
+      }
+      fs.rmSync(filePath, { force: true });
+      screenSnapshots.discard(snapshots);
+      const id = recordingJournal.idFor(filePath);
+      for (const kind of ['notes', 'live']) {
+        fs.rmSync(path.join(getUserDataDir(), 'recovery', id + '-' + kind + '.txt'), { force: true });
+      }
+      recordingJournal.forget(id);
+      recordingCaptureFiles = null;
+    }
+    const draft = userNotesFilePath(getOutputDir(), name);
+    if (!appendTo || originalAppendDraft === null) fs.rmSync(draft, { force: true });
+    else if (originalAppendDraft !== undefined) fs.writeFileSync(draft, originalAppendDraft);
+    return { success: true, message: 'Recording discarded', summaryFile: appendTo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  } finally {
+    discardCleanupPending = false;
   }
 });
 
@@ -10303,6 +10381,7 @@ let activeSysAudioSummaryFile = null;
 
 ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
   try {
+    if (discardedSessionName !== null) return { success: false, error: 'Recording discarded' };
     // Reclaim a stream left open by a prior recording that never cleanly
     // stopped (e.g. a renderer reload mid-capture). End (flush) it and leave
     // its partial file on disk under recordings/ — abandoned rather than
@@ -10343,6 +10422,7 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
     activeSysAudioWriteStream = stream;
     activeSysAudioFilePath = filePath;
     activeSysAudioSnapshots = screenSnapshots.start(filePath, currentRecordingAppendTarget);
+    recordingCaptureFiles = { filePath, stream, snapshots: activeSysAudioSnapshots };
     activeSysAudioSummaryFile = summaryFileForAudio(filePath);
     activeSysAudioBytesWritten = 0;
     sendDebugLog('[sysaudio] opened recording for incremental write');
@@ -10355,6 +10435,7 @@ ipcMain.handle('open-system-audio-file', async (_event, sessionName) => {
 
 ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
   try {
+    if (discardedSessionName !== null) return { success: true };
     if (!activeSysAudioWriteStream) {
       return { success: false, error: 'No open system audio file' };
     }
@@ -10384,7 +10465,10 @@ ipcMain.handle('append-system-audio-chunk', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('close-system-audio-file', async () => {
+ipcMain.handle('close-system-audio-file', async (_event, expectedFile) => {
+  if (discardedSessionName !== null || (expectedFile && expectedFile !== activeSysAudioFilePath)) {
+    return { success: true };
+  }
   screenSnapshots.stop();
   const stream = activeSysAudioWriteStream;
   const filePath = activeSysAudioFilePath;
@@ -10596,6 +10680,8 @@ ipcMain.handle('process-system-audio-recording', async (event, audioFilePath, se
 // otherwise leak recordingRuntimeState.startedAtMs.
 ipcMain.on('system-audio-recording-state', (event, isRecording) => {
   sendDebugLog(`[sysaudio] state -> ${isRecording ? 'true' : 'false'} (was ${systemAudioRecordingActive})`);
+  if (discardedSessionName !== null && isRecording) return;
+
   systemAudioRecordingActive = isRecording;
   applyRecordingBackgroundThrottling();
   if (!isRecording && !currentRecordingProcess) {
